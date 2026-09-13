@@ -1,0 +1,9 @@
+# Copy this file to .env.local and fill in the values from your Sanity project
+# (Manage project -> Project ID, at https://www.sanity.io/manage)
+
+NEXT_PUBLIC_SANITY_PROJECT_ID=your_project_id
+NEXT_PUBLIC_SANITY_DATASET=production
+NEXT_PUBLIC_SANITY_API_VERSION=2024-01-01
+
+# Optional: only needed if you later add previews of unpublished drafts
+# SANITY_API_READ_TOKEN=
