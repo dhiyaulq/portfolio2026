@@ -1,20 +1,86 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Rows3, Columns2, Box, Layers } from "lucide-react";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { urlFor } from "@/lib/sanity";
 import type { WorkListItem } from "@/lib/queries";
 
 type Mode = "1-col" | "2-col" | "3d-1" | "3d-2";
+type IconProps = { className?: string };
 
-const MODES: { id: Mode; label: string; icon: typeof Rows3 }[] = [
-  { id: "1-col", label: "1-Col", icon: Rows3 },
-  { id: "2-col", label: "2-Col", icon: Columns2 },
-  { id: "3d-1", label: "3D - 1", icon: Box },
-  { id: "3d-2", label: "3D - 2", icon: Layers },
+// Layout-switcher icons, exact paths exported from the Figma toggle control
+// (fill swapped for currentColor so active/inactive tinting still works).
+function OneColIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className}>
+      <path
+        fill="currentColor"
+        d="M11.7333 1.33333H4.26667C3.7512 1.33333 3.33333 1.75973 3.33333 2.28571V13.7143C3.33333 14.2403 3.7512 14.6667 4.26667 14.6667H11.7333C12.2488 14.6667 12.6667 14.2403 12.6667 13.7143V2.28571C12.6667 1.75973 12.2488 1.33333 11.7333 1.33333Z"
+      />
+    </svg>
+  );
+}
+
+function TwoColIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className}>
+      <path
+        fill="currentColor"
+        d="M1.33333 2C1.33333 1.63181 1.63181 1.33333 2 1.33333H6.66667C7.03487 1.33333 7.33333 1.63181 7.33333 2V14C7.33333 14.3682 7.03487 14.6667 6.66667 14.6667H2C1.63181 14.6667 1.33333 14.3682 1.33333 14V2Z"
+      />
+      <path
+        fill="currentColor"
+        d="M8.66667 2C8.66667 1.63181 8.96513 1.33333 9.33333 1.33333H14C14.3682 1.33333 14.6667 1.63181 14.6667 2V14C14.6667 14.3682 14.3682 14.6667 14 14.6667H9.33333C8.96513 14.6667 8.66667 14.3682 8.66667 14V2Z"
+      />
+    </svg>
+  );
+}
+
+function ThreeDOneIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className}>
+      <path
+        fill="currentColor"
+        d="M13.9999 3.33333H12.6667L12.6667 4V12L12.6667 12.6667H13.9999C14.3681 12.6667 14.6666 12.3682 14.6666 12V4C14.6666 3.63181 14.3681 3.33333 13.9999 3.33333Z"
+      />
+      <path
+        fill="currentColor"
+        d="M2.00003 3.33333H3.33332L3.3333 4V12L3.33333 12.6667H2.00003C1.63185 12.6667 1.33337 12.3682 1.33337 12V4C1.33337 3.63181 1.63185 3.33333 2.00003 3.33333Z"
+      />
+      <path
+        fill="currentColor"
+        d="M4 2C4 1.63181 4.35817 1.33333 4.8 1.33333H11.2C11.6418 1.33333 12 1.63181 12 2V14C12 14.3682 11.6418 14.6667 11.2 14.6667H4.8C4.35817 14.6667 4 14.3682 4 14V2Z"
+      />
+    </svg>
+  );
+}
+
+function ThreeDTwoIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className}>
+      <path
+        fill="currentColor"
+        d="M3.33333 2.00003V3.33332L4 3.3333H12L12.6667 3.33333V2.00003C12.6667 1.63185 12.3682 1.33337 12 1.33337H4C3.63181 1.33337 3.33333 1.63185 3.33333 2.00003Z"
+      />
+      <path
+        fill="currentColor"
+        d="M3.33333 13.9999V12.6667L4 12.6667H12L12.6667 12.6667V13.9999C12.6667 14.3681 12.3682 14.6666 12 14.6666H4C3.63181 14.6666 3.33333 14.3681 3.33333 13.9999Z"
+      />
+      <path
+        fill="currentColor"
+        d="M2 12C1.63181 12 1.33333 11.6418 1.33333 11.2V4.8C1.33333 4.35817 1.63181 4 2 4H14C14.3682 4 14.6667 4.35817 14.6667 4.8V11.2C14.6667 11.6418 14.3682 12 14 12H2Z"
+      />
+    </svg>
+  );
+}
+
+const MODES: { id: Mode; label: string; icon: ComponentType<IconProps> }[] = [
+  { id: "1-col", label: "1-Col", icon: OneColIcon },
+  { id: "2-col", label: "2-Col", icon: TwoColIcon },
+  { id: "3d-1", label: "3D - 1", icon: ThreeDOneIcon },
+  { id: "3d-2", label: "3D - 2", icon: ThreeDTwoIcon },
 ];
 
 function aspect(work: WorkListItem): number {

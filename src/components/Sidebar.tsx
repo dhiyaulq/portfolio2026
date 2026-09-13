@@ -1,16 +1,24 @@
 import type { ComponentType } from "react";
-import { ArrowUpRight, MessageCircle } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import { siteConfig } from "@/lib/siteConfig";
+import SendEmailButton from "@/components/SendEmailButton";
 
-function Logomark() {
-  // Small waveform mark next to the "dsign" wordmark.
+function WorkedWithLogo({
+  logo,
+}: {
+  logo: { name: string; logo?: string; mark?: string; type?: string };
+}) {
+  if (logo.logo) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={logo.logo} alt={logo.name} className="h-6 w-auto shrink-0" />;
+  }
   return (
-    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
-      <rect x="0" y="6" width="3" height="8" rx="1.5" fill="#181717" />
-      <rect x="5.5" y="2" width="3" height="16" rx="1.5" fill="#181717" />
-      <rect x="11" y="5" width="3" height="10" rx="1.5" fill="#181717" />
-      <rect x="16.5" y="8" width="3" height="4" rx="1.5" fill="#181717" />
-    </svg>
+    <span className="flex shrink-0 items-center gap-1.5">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={logo.mark} alt="" className="h-6 w-auto" />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={logo.type} alt={logo.name} className="h-5 w-auto" />
+    </span>
   );
 }
 
@@ -29,7 +37,7 @@ function SkillBadge({
         className={
           tone === "dark"
             ? "flex shrink-0 items-center justify-center rounded-lg border-[0.5px] border-border bg-gradient-to-b from-[#797979] via-[#5a5a5c] to-[#373b3f] p-1 shadow-[inset_0px_2px_4px_0px_rgba(255,255,255,0.3)]"
-            : "flex shrink-0 items-center justify-center rounded-lg border-[0.5px] border-black/5 bg-white p-1 shadow-sm"
+            : "flex shrink-0 items-center justify-center rounded-lg border-[0.5px] border-[rgba(0,0,0,0.07)] bg-white p-1 shadow-[0px_4px_0.5px_rgba(0,0,0,0),0px_2px_0.5px_rgba(0,0,0,0.01),0px_1px_0.5px_rgba(0,0,0,0.03),0px_1px_0.5px_rgba(0,0,0,0.04)]"
         }
       >
         <Icon
@@ -47,12 +55,13 @@ export default function Sidebar() {
       <div className="flex flex-col gap-6 sm:gap-8">
         {/* Logo + intro */}
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <Logomark />
-            <span className="text-lg font-semibold tracking-tight text-heading">
-              dsign
-            </span>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/icons/dsign-logo.svg"
+            alt="dsign"
+            className="h-[26px] w-[94px] shrink-0 self-start"
+          />
+
           <p className="text-base leading-6 tracking-[-0.08px] text-foreground">
             {siteConfig.bio}
           </p>
@@ -60,13 +69,7 @@ export default function Sidebar() {
 
         {/* CTA buttons */}
         <div className="flex flex-wrap gap-4">
-          <a
-            href={`mailto:${siteConfig.email}`}
-            className="flex items-center gap-1.5 rounded-full border border-accent bg-gradient-to-b from-[#2ba2fe] to-[#1389e3] py-2 pl-3 pr-2 shadow-[0px_1px_1.5px_rgba(22,148,246,0.15)]"
-          >
-            <span className="text-sm font-semibold text-white">Send Email</span>
-            <ArrowUpRight className="h-3 w-3 text-white" />
-          </a>
+          <SendEmailButton email={siteConfig.email} />
           <a
             href={siteConfig.chatUrl}
             className="flex items-center gap-1.5 rounded-full border border-black/[0.02] bg-white py-2 pl-2 pr-3 shadow-sm"
@@ -87,13 +90,8 @@ export default function Sidebar() {
                   "linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%)",
               }}
             >
-              {siteConfig.workedWith.map((name) => (
-                <span
-                  key={name}
-                  className="shrink-0 whitespace-nowrap text-base font-semibold text-[#181717]/70"
-                >
-                  {name}
-                </span>
+              {siteConfig.workedWith.map((logo) => (
+                <WorkedWithLogo key={logo.name} logo={logo} />
               ))}
             </div>
           </div>
