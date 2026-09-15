@@ -38,7 +38,7 @@ function SkillBadge({
           padding each side); a real border would add its width to the box and
           render 23x23, nudging the label across too. */}
       <div
-        className={`flex shrink-0 items-center justify-center rounded-lg p-1 ${
+        className={`flex shrink-0 items-center justify-center rounded-md p-1 ${
           tone === "dark" ? "" : "bg-white"
         }`}
         style={

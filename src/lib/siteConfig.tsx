@@ -46,7 +46,7 @@ export const siteConfig = {
   name: "Dhiya",
   bio: "I’m Dhiya, a product designer located in Indonesia. Partnering with forward-thinking teams to create thoughtful interfaces, websites, and brand identities designed for lasting growth",
   email: "dhiyaulhaqmahmud@gmail.com",
-  chatUrl: "#", // e.g. a Calendly / WhatsApp / Telegram link
+  chatUrl: "https://t.me/dsignspace",
   copyright: "© 2026, Dhiya Ulhaq Mahmud.",
 
   // "Worked with" logos, exported from Figma 135:445. Each carries its own
