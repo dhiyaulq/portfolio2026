@@ -46,14 +46,21 @@ export const work = defineType({
     }),
     defineField({
       name: "gallery",
-      title: "Gallery images",
+      title: "Showcase media",
       type: "array",
       description:
-        "Additional high-quality images shown on this project's detail page.",
+        "The images/videos shown for this project on the homepage carousel. Leave empty to just show the cover image.",
       of: [
         {
           type: "image",
+          title: "Image",
           options: { hotspot: true },
+        },
+        {
+          type: "file",
+          name: "video",
+          title: "Video",
+          options: { accept: "video/*" },
         },
       ],
     }),

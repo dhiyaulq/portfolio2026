@@ -1,7 +1,8 @@
 import { groq } from "next-sanity";
 
 // All published work items, ordered by the manual "order" field (lowest first),
-// falling back to newest-created first.
+// falling back to newest-created first. Pulls the full showcase gallery so the
+// homepage carousel can cycle through each work's images/videos directly.
 export const ALL_WORK_QUERY = groq`
   *[_type == "work" && defined(slug.current)] | order(order asc, _createdAt desc) {
     _id,
@@ -12,38 +13,31 @@ export const ALL_WORK_QUERY = groq`
     coverImage {
       ...,
       "dimensions": asset->metadata.dimensions
+    },
+    gallery[] {
+      _key,
+      _type,
+      ...,
+      "dimensions": asset->metadata.dimensions,
+      "videoUrl": asset->url
     }
   }
 `;
 
-// One work item by slug, including the full image gallery for its detail page.
-export const WORK_BY_SLUG_QUERY = groq`
-  *[_type == "work" && slug.current == $slug][0] {
-    _id,
-    title,
-    category,
-    year,
-    description,
-    coverImage,
-    gallery
-  }
-`;
+export type MediaItem = {
+  _key: string;
+  _type: "image" | "video";
+  dimensions?: { width: number; height: number };
+  videoUrl?: string;
+  [key: string]: unknown;
+};
 
 export type WorkListItem = {
   _id: string;
   title: string;
   slug: string;
   category?: string;
-  coverImage: any;
+  coverImage: MediaItem;
+  gallery?: MediaItem[];
   year?: number;
-};
-
-export type WorkDetail = {
-  _id: string;
-  title: string;
-  category?: string;
-  year?: number;
-  description?: string;
-  coverImage: any;
-  gallery?: any[];
 };

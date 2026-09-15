@@ -35,3 +35,6 @@ next-env.d.ts
 
 # sanity
 sanity/dist
+
+# local working files (source artwork lives in Sanity)
+/images

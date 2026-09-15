@@ -1,26 +1,26 @@
 import type { ComponentType } from "react";
-import { MessageCircle } from "lucide-react";
 import { siteConfig } from "@/lib/siteConfig";
 import SendEmailButton from "@/components/SendEmailButton";
+import ChatNowButton from "@/components/ChatNowButton";
+import LogoMarquee from "@/components/LogoMarquee";
 
-function WorkedWithLogo({
-  logo,
-}: {
-  logo: { name: string; logo?: string; mark?: string; type?: string };
-}) {
-  if (logo.logo) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={logo.logo} alt={logo.name} className="h-6 w-auto shrink-0" />;
-  }
-  return (
-    <span className="flex shrink-0 items-center gap-1.5">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={logo.mark} alt="" className="h-6 w-auto" />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={logo.type} alt={logo.name} className="h-5 w-auto" />
-    </span>
-  );
-}
+// Section headings ("I've worked with" / "Design" / "Development"), Figma
+// 127:260 — 15px/23px, -0.075px tracking, #7d7d7d.
+const SECTION_LABEL =
+  "text-[15px] leading-[23px] tracking-[-0.075px] text-[#7d7d7d]";
+
+// Both tile tones carry the same four-layer drop shadow (Figma 127:313 /
+// 127:359). The tiles are opaque, so box-shadow reproduces Figma's
+// drop-shadow exactly here — nothing shows through to darken the fill.
+const BADGE_SHADOW =
+  "0px 4px 0.5px rgba(0,0,0,0), 0px 2px 0.5px rgba(0,0,0,0.01), 0px 1px 0.5px rgba(0,0,0,0.03), 0px 1px 0.5px rgba(0,0,0,0.04)";
+
+// Dark tile fill. The source is a radial gradient with userSpaceOnUse on a
+// 22x22 box: centre (11, 0) — top centre — with semi-axes 22 x 22, i.e.
+// 100% x 100% of the box. It is NOT the vertical linear gradient it can look
+// like at 22px.
+const BADGE_FILL_DARK =
+  "radial-gradient(100% 100% at 50% 0%, #4d5257 0%, #373b3f 100%)";
 
 function SkillBadge({
   icon: Icon,
@@ -33,73 +33,73 @@ function SkillBadge({
 }) {
   return (
     <div className="flex flex-1 items-center gap-2 min-w-0">
+      {/* The 0.5px stroke is drawn as an inset ring rather than a CSS border.
+          Figma aligns it inside, so the tile stays 22x22 (14px icon + 4px
+          padding each side); a real border would add its width to the box and
+          render 23x23, nudging the label across too. */}
       <div
-        className={
+        className={`flex shrink-0 items-center justify-center rounded-lg p-1 ${
+          tone === "dark" ? "" : "bg-white"
+        }`}
+        style={
           tone === "dark"
-            ? "flex shrink-0 items-center justify-center rounded-lg border-[0.5px] border-border bg-gradient-to-b from-[#797979] via-[#5a5a5c] to-[#373b3f] p-1 shadow-[inset_0px_2px_4px_0px_rgba(255,255,255,0.3)]"
-            : "flex shrink-0 items-center justify-center rounded-lg border-[0.5px] border-[rgba(0,0,0,0.07)] bg-white p-1 shadow-[0px_4px_0.5px_rgba(0,0,0,0),0px_2px_0.5px_rgba(0,0,0,0.01),0px_1px_0.5px_rgba(0,0,0,0.03),0px_1px_0.5px_rgba(0,0,0,0.04)]"
+            ? {
+                backgroundImage: BADGE_FILL_DARK,
+                boxShadow: `${BADGE_SHADOW}, inset 0px 2px 4px 0px rgba(255,255,255,0.3), inset 0 0 0 0.5px #373b3f`,
+              }
+            : { boxShadow: `${BADGE_SHADOW}, inset 0 0 0 0.5px rgba(0,0,0,0.1)` }
         }
       >
         <Icon
           className={tone === "dark" ? "h-3.5 w-3.5 text-white" : "h-3.5 w-3.5 text-[#141414]"}
         />
       </div>
-      <p className="truncate text-sm font-medium text-skill">{label}</p>
+      <p className="truncate text-[15px] leading-[23px] tracking-[-0.075px] text-skill">
+        {label}
+      </p>
     </div>
   );
 }
 
 export default function Sidebar() {
   return (
-    <aside className="flex w-full shrink-0 flex-col justify-between gap-8 bg-sidebar p-8 sm:p-10 lg:sticky lg:top-0 lg:h-screen lg:w-[457px] lg:overflow-y-auto">
+    <aside className="flex w-full shrink-0 flex-col justify-between gap-8 bg-sidebar p-8 sm:p-10 lg:fixed lg:inset-y-0 lg:left-0 lg:h-screen lg:w-[457px] lg:overflow-y-auto">
       <div className="flex flex-col gap-6 sm:gap-8">
-        {/* Logo + intro */}
-        <div className="flex flex-col gap-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/icons/dsign-logo.svg"
-            alt="dsign"
-            className="h-[26px] w-[94px] shrink-0 self-start"
-          />
+        {/* Figma 127:237 — the logo/intro block and the CTA row are one group
+            with 24px between them, sitting 32px from the sections below. */}
+        <div className="flex flex-col gap-6">
+          {/* Logo + intro (127:238, 16px) */}
+          <div className="flex flex-col gap-4">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/icons/dsign-logo.svg"
+              alt="dsign"
+              className="h-[26px] w-[94px] shrink-0 self-start"
+            />
 
-          <p className="text-base leading-6 tracking-[-0.08px] text-foreground">
-            {siteConfig.bio}
-          </p>
-        </div>
+            <p className="text-[15px] leading-[23px] tracking-[-0.075px] text-foreground">
+              {siteConfig.bio}
+            </p>
+          </div>
 
-        {/* CTA buttons */}
-        <div className="flex flex-wrap gap-4">
-          <SendEmailButton email={siteConfig.email} />
-          <a
-            href={siteConfig.chatUrl}
-            className="flex items-center gap-1.5 rounded-full border border-black/[0.02] bg-white py-2 pl-2 pr-3 shadow-sm"
-          >
-            <MessageCircle className="h-4 w-4 text-[#1e1e1e]" />
-            <span className="text-sm font-semibold text-[#1e1e1e]">Chat Now</span>
-          </a>
+          {/* CTA buttons (127:251, 16px) */}
+          <div className="flex flex-wrap gap-4">
+            <SendEmailButton email={siteConfig.email} />
+            <ChatNowButton href={siteConfig.chatUrl} />
+          </div>
         </div>
 
         {/* Worked with */}
         {siteConfig.workedWith.length > 0 && (
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-muted">I&rsquo;ve worked with</p>
-            <div
-              className="flex gap-8 overflow-x-auto"
-              style={{
-                maskImage:
-                  "linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%)",
-              }}
-            >
-              {siteConfig.workedWith.map((logo) => (
-                <WorkedWithLogo key={logo.name} logo={logo} />
-              ))}
-            </div>
+            <p className={SECTION_LABEL}>I&rsquo;ve worked with</p>
+            <LogoMarquee logos={siteConfig.workedWith} />
           </div>
         )}
 
         {/* Design skills */}
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-muted">Design</p>
+          <p className={SECTION_LABEL}>Design</p>
           <div className="flex flex-col gap-2">
             {Array.from({ length: Math.ceil(siteConfig.design.length / 2) }).map(
               (_, row) => (
@@ -116,7 +116,7 @@ export default function Sidebar() {
         {/* Development tools */}
         {siteConfig.development.length > 0 && (
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-muted">Development</p>
+            <p className={SECTION_LABEL}>Development</p>
             <div className="flex flex-col gap-2">
               {Array.from({ length: Math.ceil(siteConfig.development.length / 2) }).map(
                 (_, row) => (

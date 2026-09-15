@@ -11,8 +11,10 @@ const config: Config = {
         // Pulled directly from the Figma file (dsign-studio)
         background: "#ffffff",
         sidebar: "#f8f8f8",
-        foreground: "#181717",
-        heading: "#1e1e1e",
+        // Every near-black in the UI is #141414 — body copy, headings and the
+        // secondary CTA label all resolve here.
+        foreground: "#141414",
+        heading: "#141414",
         muted: "#474747",
         skill: "#141414",
         border: "#373b3f",
