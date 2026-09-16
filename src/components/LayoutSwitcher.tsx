@@ -1,7 +1,17 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState, type ComponentType } from "react";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
+import {
+  DOCK_BUTTON_CLASS,
+  DOCK_CLASS,
+  DOCK_STYLE,
+  ICON_ACTIVE,
+  ICON_INACTIVE,
+  NO_TAP_HIGHLIGHT,
+  PILL_SPRING,
+  PILL_STYLE,
+} from "@/components/glassDock";
 
 export type Mode = "1-col" | "2-col" | "3d-1" | "3d-2";
 type IconProps = { className?: string };
@@ -79,6 +89,38 @@ export const MODES: { id: Mode; label: string; icon: ComponentType<IconProps> }[
   { id: "3d-2", label: "3D - 2", icon: ThreeDTwoIcon },
 ];
 
+// Pop-in for the dock: it inflates from its bottom edge like a balloon — a
+// springy scale-up with a little overshoot while it rises into place — and
+// hiding plays the same motion backwards, deflating and sinking without the
+// bounce. Opacity runs on its own short tween so the fade doesn't wobble
+// with the spring.
+const DOCK_VARIANTS: Variants = {
+  shown: {
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    transition: {
+      type: "spring",
+      stiffness: 380,
+      damping: 19,
+      mass: 0.8,
+      opacity: { duration: 0.18, ease: "easeOut" },
+    },
+  },
+  hidden: {
+    opacity: 0,
+    scale: 0.4,
+    y: 28,
+    transition: {
+      type: "spring",
+      stiffness: 420,
+      damping: 34,
+      mass: 0.8,
+      opacity: { duration: 0.16, delay: 0.06, ease: "easeIn" },
+    },
+  },
+};
+
 // Floating "liquid glass" dock for switching layout modes.
 //
 // The sliding pill is driven by measured offsets rather than a shared
@@ -89,9 +131,12 @@ export const MODES: { id: Mode; label: string; icon: ComponentType<IconProps> }[
 export default function LayoutSwitcher({
   mode,
   onChange,
+  visible = true,
 }: {
   mode: Mode;
   onChange: (m: Mode) => void;
+  /** Whether the showcase is on screen; the dock pops in and out with it. */
+  visible?: boolean;
 }) {
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [pill, setPill] = useState({ left: 0, width: 0 });
@@ -108,45 +153,23 @@ export default function LayoutSwitcher({
 
   return (
     <div className="fixed inset-x-0 bottom-12 z-30 flex justify-center lg:pl-[457px]">
-      <div
-        className="relative flex items-center rounded-full p-1 backdrop-blur-xl backdrop-saturate-150"
-        style={{
-          isolation: "isolate",
-          // Two layers, grey over a black scrim. In Figma the drop-shadow
-          // casts from the alpha silhouette, so it shows THROUGH the 50%
-          // fill and darkens the bar to #E9E9E9 rather than the #F8F8F8 a
-          // naive 50% of #F1F1F1 would give. box-shadow can't reproduce that
-          // (it's clipped outside the border box) and a filter would create a
-          // backdrop root and kill the blur — so the bleed is modelled as a
-          // scrim beneath the fill, which also behaves correctly over the
-          // artwork the bar floats across.
-          backgroundImage:
-            "linear-gradient(rgba(241,241,241,0.5), rgba(241,241,241,0.5)), linear-gradient(rgba(0,0,0,0.118), rgba(0,0,0,0.118))",
-          // Figma 88:826 — five stacked layers, the top one fully transparent
-          // so the falloff stays soft. Kept as box-shadow rather than Figma's
-          // drop-shadow filter: an outer box-shadow is clipped to outside the
-          // border box, so it can't darken the glass from behind, and a filter
-          // on this element would create a new backdrop root and kill the
-          // backdrop-blur entirely.
-          boxShadow:
-            "0px 33px 4.5px rgba(0,0,0,0), 0px 21px 4px rgba(0,0,0,0.01), 0px 12px 3.5px rgba(0,0,0,0.03), 0px 5px 2.5px rgba(0,0,0,0.04), 0px 1px 1.5px rgba(0,0,0,0.05)",
-        }}
+      <motion.div
+        className={`${DOCK_CLASS} ${visible ? "" : "pointer-events-none"}`}
+        style={{ ...DOCK_STYLE, transformOrigin: "50% 100%" }}
+        initial="hidden"
+        animate={visible ? "shown" : "hidden"}
+        variants={DOCK_VARIANTS}
+        // Hidden means hidden for keyboards and screen readers too.
+        inert={!visible}
+        aria-hidden={!visible}
       >
         <motion.span
           aria-hidden
           className="absolute bottom-1 left-0 top-1 rounded-full"
           initial={false}
           animate={{ x: pill.left, width: pill.width }}
-          transition={{ type: "spring", stiffness: 500, damping: 32, mass: 0.9 }}
-          style={{
-            // Same bleed-through modelling as the bar: the pill's own
-            // drop-shadow darkens it to #F5F5F5, not the #FEFEFE that 80%
-            // white over the bar would otherwise produce.
-            backgroundImage:
-              "linear-gradient(rgba(255,255,255,0.8), rgba(255,255,255,0.8)), linear-gradient(rgba(0,0,0,0.12), rgba(0,0,0,0.12))",
-            boxShadow:
-              "0px 7px 1px rgba(0,0,0,0), 0px 5px 1px rgba(0,0,0,0.01), 0px 3px 1px rgba(0,0,0,0.03), 0px 1px 0.5px rgba(0,0,0,0.04), 0px 0px 0.5px rgba(0,0,0,0.05)",
-          }}
+          transition={PILL_SPRING}
+          style={PILL_STYLE}
         />
         {MODES.map(({ id, label, icon: Icon }, i) => {
           const active = mode === id;
@@ -160,10 +183,10 @@ export default function LayoutSwitcher({
               onClick={() => onChange(id)}
               // pl 8 / pr 12 is asymmetric in the design — the icon sits
               // tighter to the left edge than the label does to the right.
-              className={`group relative flex items-center gap-1.5 rounded-full py-2 pl-2 pr-3 text-sm font-medium leading-4 outline-none transition-colors focus:outline-none focus-visible:outline-none ${
+              className={`${DOCK_BUTTON_CLASS} gap-1.5 py-2 pl-2 pr-3 text-sm font-medium leading-4 ${
                 active ? "text-accent" : "text-[#4c4b4b] hover:text-accent"
               }`}
-              style={{ WebkitTapHighlightColor: "transparent" }}
+              style={NO_TAP_HIGHLIGHT}
             >
               {/* The icon is deliberately a lighter tone than its label —
                   #49A8F1 against #1389e3 when active, #A7A5A5 against #4c4b4b
@@ -171,16 +194,14 @@ export default function LayoutSwitcher({
                   both icons too dark. */}
               <Icon
                 className={`relative h-4 w-4 transition-colors ${
-                  active
-                    ? "text-[#49A8F1]"
-                    : "text-[#A7A5A5] group-hover:text-[#49A8F1]"
+                  active ? ICON_ACTIVE : ICON_INACTIVE
                 }`}
               />
               <span className="relative">{label}</span>
             </button>
           );
         })}
-      </div>
+      </motion.div>
     </div>
   );
 }

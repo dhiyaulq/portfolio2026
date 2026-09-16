@@ -63,7 +63,7 @@ function SkillBadge({
 
 export default function Sidebar() {
   return (
-    <aside className="flex w-full shrink-0 flex-col justify-between gap-8 bg-sidebar p-8 sm:p-10 lg:fixed lg:inset-y-0 lg:left-0 lg:h-screen lg:w-[457px] lg:overflow-y-auto">
+    <aside className="flex min-h-svh w-full shrink-0 flex-col justify-between gap-8 bg-sidebar p-8 sm:p-10 lg:fixed lg:min-h-0 lg:inset-y-0 lg:left-0 lg:h-screen lg:w-[457px] lg:overflow-y-auto">
       <div className="flex flex-col gap-6 sm:gap-8">
         {/* Figma 127:237 — the logo/intro block and the CTA row are one group
             with 24px between them, sitting 32px from the sections below. */}

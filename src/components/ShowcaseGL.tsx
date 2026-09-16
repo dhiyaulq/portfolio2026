@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import Lenis from "lenis";
 import { urlFor } from "@/lib/sanity";
-import { playTick, primeTickSound } from "@/lib/tickSound";
+import { playTick, primeTickSound, tickSoundState } from "@/lib/tickSound";
 import type { MediaItem, WorkListItem } from "@/lib/queries";
 import LayoutSwitcher, { type Mode } from "@/components/LayoutSwitcher";
 
@@ -132,7 +132,12 @@ function contentHeight(mode: Mode, count: number, colW: number, viewportH: numbe
   }
   const { h } = flowCardSize(mode, colW);
   const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
-  return TOP_PAD + rows * (h + GAP) - GAP + BOTTOM_PAD;
+  // Never shorter than one screen. On mobile the showcase sits below the
+  // hero, and if its content is shorter than the viewport (2-col on a phone
+  // is ~550px) the page can't scroll far enough for the section to reach the
+  // top — the switcher would read that as "still in the hero", hide, and
+  // could never be brought back.
+  return Math.max(TOP_PAD + rows * (h + GAP) - GAP + BOTTOM_PAD, viewportH);
 }
 
 /**
@@ -140,17 +145,17 @@ function contentHeight(mode: Mode, count: number, colW: number, viewportH: numbe
  * means card (or row) 2 is dead centre, 2.5 means halfway to the next. The
  * tick sound fires whenever this crosses a whole number.
  */
-function focusIndex(mode: Mode, count: number, scrollY: number, vp: Viewport) {
+function focusIndex(mode: Mode, count: number, local: number, vp: Viewport) {
   const last = Math.max(count - 1, 0);
   if (mode === "3d-1" || mode === "3d-2") {
     const range = Math.max(contentHeight(mode, count, vp.colW, vp.colH) - vp.colH, 1);
-    return Math.min(Math.max(scrollY / range, 0), 1) * last;
+    return Math.min(Math.max(local / range, 0), 1) * last;
   }
   const { h } = flowCardSize(mode, vp.colW);
   const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
-  // Card centre sits at TOP_PAD + i*pitch + h/2 in page space; it's centred
-  // when that equals scrollY + half the viewport.
-  const f = (scrollY + vp.colH / 2 - TOP_PAD - h / 2) / (h + GAP);
+  // Card centre sits at TOP_PAD + i*pitch + h/2 in section space; it's
+  // centred when that equals the scroll offset + half the viewport.
+  const f = (local + vp.colH / 2 - TOP_PAD - h / 2) / (h + GAP);
   return Math.min(Math.max(f, 0), Math.max(rows - 1, 0));
 }
 
@@ -164,17 +169,25 @@ function crossings(a: number, b: number) {
  * centre of the canvas and +y up. This is the single source of truth for all
  * four states; switching mode just changes what this returns, and the render
  * loop eases each plane toward it — which is what produces the transition.
+ *
+ * `local` is scroll measured from the top of the showcase section, not the
+ * page. On desktop the sidebar is fixed, so the two are the same. On mobile
+ * the sidebar sits above as a hero, so `local` is negative until you reach
+ * the showcase — which is what keeps the cards below the hero.
  */
 function targetFor(
   mode: Mode,
   index: number,
   count: number,
-  scrollY: number,
+  local: number,
   vp: Viewport
 ): Target {
   if (mode === "3d-1" || mode === "3d-2") {
     const range = Math.max(contentHeight(mode, count, vp.colW, vp.colH) - vp.colH, 1);
-    const progress = Math.min(Math.max(scrollY / range, 0), 1);
+    const progress = Math.min(Math.max(local / range, 0), 1);
+    // The 3D stage behaves like a sticky, screen-tall panel: it scrolls up
+    // with the page until the section reaches the top, then stays pinned.
+    const stageShift = Math.min(local, 0);
     const active = progress * Math.max(count - 1, 0);
     const d = index - active;
     const ad = Math.abs(d);
@@ -184,7 +197,7 @@ function targetFor(
     return {
       x: mode === "3d-2" ? lerpTable(OFFSET_D, OFFSET_X, d) * fit : 0,
       // Figma offsets are measured downward; world +y is up.
-      y: mode === "3d-1" ? -lerpTable(OFFSET_D, OFFSET_Y, d) * fit : 0,
+      y: (mode === "3d-1" ? -lerpTable(OFFSET_D, OFFSET_Y, d) * fit : 0) + stageShift,
       w,
       h: w * RATIO,
       opacity: lerpTable(DIST, FADE, ad),
@@ -196,7 +209,7 @@ function targetFor(
   const pitch = h + GAP;
   const col = mode === "2-col" ? index % 2 : 0;
   const row = mode === "2-col" ? Math.floor(index / 2) : index;
-  const screenTop = TOP_PAD + row * pitch - scrollY;
+  const screenTop = TOP_PAD + row * pitch - local;
   return {
     x: mode === "2-col" ? (col - 0.5) * (w + GAP) : 0,
     y: vp.colH / 2 - (screenTop + h / 2),
@@ -276,6 +289,13 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   // ease on their own; the rest of the time Lenis has already smoothed the
   // scroll, and easing on top of it again would make the cards trail.
   const settlingRef = useRef(false);
+  // The showcase section, and the viewport the scene is laid out against.
+  // Handlers outside the render loop read these so they agree with it exactly.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<Viewport | null>(null);
+  // The switcher only shows once the showcase has scrolled to the top — on
+  // desktop that's always; on mobile it waits until you're past the hero.
+  const [switcherVisible, setSwitcherVisible] = useState(false);
   const count = works.length;
   const lastIndex = Math.max(count - 1, 0);
 
@@ -307,6 +327,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       colH: window.innerHeight,
       is3D: false,
     };
+    viewportRef.current = viewport;
     // Fixed for the life of the scene: swapping texture sizes mid-session
     // would refetch every image and flash.
     const tex = textureSizeFor(viewport.colW, viewport.colH, dpr);
@@ -372,10 +393,21 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       return { mesh, material, current: null as Target | null, src, load };
     });
 
+    // Phones resize the viewport whenever the address bar slides in or out,
+    // which would re-flow every card and jump the 3D progress mid-scroll. On
+    // touch devices a height-only change is ignored (we keep the tallest
+    // height seen for this width); a width change — rotation — resets it.
+    const coarse = window.matchMedia("(pointer: coarse)").matches;
+    let lastWidth = window.innerWidth;
     const resize = () => {
-      const wide = window.innerWidth >= LG_BREAKPOINT;
-      viewport.colW = wide ? window.innerWidth - SIDEBAR_W : window.innerWidth;
-      viewport.colH = window.innerHeight;
+      const width = window.innerWidth;
+      const wide = width >= LG_BREAKPOINT;
+      viewport.colW = wide ? width - SIDEBAR_W : width;
+      viewport.colH =
+        coarse && width === lastWidth
+          ? Math.max(viewport.colH, window.innerHeight)
+          : window.innerHeight;
+      lastWidth = width;
       // updateStyle must stay on: without a CSS size the canvas lays itself
       // out at its drawing-buffer size, which is colW * devicePixelRatio.
       renderer.setSize(viewport.colW, viewport.colH);
@@ -413,24 +445,45 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
 
     let raf = 0;
     let first = true;
+    let shown: boolean | null = null;
     let prev = performance.now();
     // Exponential damping for mode transitions, expressed per second rather
     // than per frame so it feels identical on 60Hz and 120Hz displays.
     const LAMBDA = 9;
 
-    const tick = (now: number) => {
+    const frame = (now: number) => {
       // Clamp dt so returning to a backgrounded tab doesn't teleport cards.
       const dt = Math.min((now - prev) / 1000, 1 / 20);
       prev = now;
       lenis.raf(now);
       const scrollY = window.scrollY;
+      // Scroll measured from the top of the showcase section (0 on desktop,
+      // the hero's height on mobile). offsetTop is cheap when layout is clean.
+      const origin = rootRef.current?.offsetTop ?? 0;
+      const local = scrollY - origin;
       const m = modeRef.current;
       let motion = 0;
 
-      // Tick each time a card passes through the centre. A mode switch jumps
-      // the index outright, so it re-baselines instead of counting.
-      const focus = focusIndex(m, count, scrollY, viewport);
-      if (lastFocus !== null && m === lastFocusMode && crossings(lastFocus, focus) > 0) {
+      // Show the switcher once the showcase reaches the top of the screen and
+      // hide it again back in the hero. The 24px band stops it flickering if
+      // someone rests right on the boundary.
+      const show = local >= 0 ? true : local < -24 ? false : (shown ?? false);
+      if (show !== shown) {
+        shown = show;
+        setSwitcherVisible(show);
+      }
+
+      // Tick each time a card passes through the centre — 3D layouts only,
+      // where cards click through one at a time like a dial; in the column
+      // layouts it felt disconnected from the motion. A mode switch jumps the
+      // index outright, so it re-baselines instead of counting.
+      const focus = focusIndex(m, count, local, viewport);
+      if (
+        (m === "3d-1" || m === "3d-2") &&
+        lastFocus !== null &&
+        m === lastFocusMode &&
+        crossings(lastFocus, focus) > 0
+      ) {
         playTick();
       }
       lastFocus = focus;
@@ -442,7 +495,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const k = first ? 1 : settlingRef.current ? 1 - Math.exp(-LAMBDA * dt) : 1;
 
       planes.forEach((p, i) => {
-        const t = targetFor(m, i, count, scrollY, viewport);
+        const t = targetFor(m, i, count, local, viewport);
 
         // Pull the texture in just before it's needed, judged on the *target*
         // rather than the eased position so it arrives ahead of the card.
@@ -496,6 +549,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           renderCount,
           tickCount,
           textures: renderer.info.memory.textures,
+          sound: tickSoundState(),
           planes: planes.map((p) => ({ ...p.current, src: p.src })),
         };
       }
@@ -509,9 +563,18 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         renderCount++;
       }
       tickCount++;
+    };
+    const tick = (now: number) => {
+      frame(now);
       raf = requestAnimationFrame(tick);
     };
     tick(prev);
+    if (process.env.NODE_ENV === "development") {
+      // Lets a test advance exactly one frame while the tab is hidden (when
+      // requestAnimationFrame is paused) without queueing extra loops.
+      (window as unknown as Record<string, unknown>).__glStep = () =>
+        frame(performance.now());
+    }
 
     return () => {
       cancelAnimationFrame(raf);
@@ -530,24 +593,32 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   }, [works, count]);
 
   // --- mode changes keep the work you were looking at ----------------------
-  const columnWidth = () =>
-    window.innerWidth >= LG_BREAKPOINT ? window.innerWidth - SIDEBAR_W : window.innerWidth;
+  // Everything here is in section-local scroll and uses the same viewport the
+  // render loop lays out against (which ignores address-bar height changes on
+  // phones), so the two can't disagree about where a card is.
+  const layoutSize = () => {
+    const vp = viewportRef.current;
+    if (vp) return { colW: vp.colW, vh: vp.colH };
+    const w = window.innerWidth;
+    return { colW: w >= LG_BREAKPOINT ? w - SIDEBAR_W : w, vh: window.innerHeight };
+  };
+  const sectionTop = () => rootRef.current?.offsetTop ?? 0;
 
   const readAnchor = (m: Mode) => {
-    const colW = columnWidth();
-    const vh = window.innerHeight;
+    const { colW, vh } = layoutSize();
+    const local = Math.max(window.scrollY - sectionTop(), 0);
     if (m === "3d-1" || m === "3d-2") {
       const range = Math.max(contentHeight(m, count, colW, vh) - vh, 1);
-      return Math.round(Math.min(Math.max(window.scrollY / range, 0), 1) * lastIndex);
+      return Math.round(Math.min(local / range, 1) * lastIndex);
     }
     const { h } = flowCardSize(m, colW);
-    const row = Math.round(Math.max(window.scrollY - TOP_PAD + 1, 0) / (h + GAP));
+    const row = Math.round(Math.max(local - TOP_PAD + 1, 0) / (h + GAP));
     return Math.min(m === "2-col" ? row * 2 : row, lastIndex);
   };
 
+  /** Section-local scroll offset that puts `anchor` in view in mode `m`. */
   const scrollForAnchor = (m: Mode, anchor: number) => {
-    const colW = columnWidth();
-    const vh = window.innerHeight;
+    const { colW, vh } = layoutSize();
     const total = contentHeight(m, count, colW, vh);
     const max = Math.max(total - vh, 0);
     if (m === "3d-1" || m === "3d-2") {
@@ -561,9 +632,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
 
   const handleModeChange = (next: Mode) => {
     const anchor = readAnchor(modeRef.current);
-    const colW = columnWidth();
-    const nextHeight = contentHeight(next, count, colW, window.innerHeight);
-    const nextScroll = scrollForAnchor(next, anchor);
+    const { colW, vh } = layoutSize();
+    const nextHeight = contentHeight(next, count, colW, vh);
+    const nextScroll = sectionTop() + scrollForAnchor(next, anchor);
 
     // Spacer height, scroll offset and mode must all change in one synchronous
     // block. Flipping the mode first (and deferring the scroll to rAF) let the
@@ -593,12 +664,13 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   };
 
   useEffect(() => {
-    setDocHeight(contentHeight(mode, count, columnWidth(), window.innerHeight));
+    const { colW, vh } = layoutSize();
+    setDocHeight(contentHeight(mode, count, colW, vh));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, count]);
 
   return (
-    <div className="w-full flex-1">
+    <div ref={rootRef} className="w-full flex-1">
       {/* Fixed canvas over the showcase column; the spacer below gives the
           page something to scroll so wheel/trackpad still drive everything. */}
       <div
@@ -617,7 +689,11 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           to add your first project.
         </p>
       ) : (
-        <LayoutSwitcher mode={mode} onChange={handleModeChange} />
+        <LayoutSwitcher
+          mode={mode}
+          onChange={handleModeChange}
+          visible={switcherVisible}
+        />
       )}
     </div>
   );
