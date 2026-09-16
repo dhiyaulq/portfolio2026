@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import Lenis from "lenis";
 import { urlFor } from "@/lib/sanity";
@@ -105,10 +105,16 @@ function textureSizeFor(vp: Viewport, dpr: number) {
   const oneCol = Math.min(ONE_COL_W, Math.max(vp.colW - side * 2, 240));
   const focus3D = CARD_3D_W * fit3D(vp);
   const cardCss = Math.max(oneCol, focus3D);
-  const w = Math.min(Math.max(Math.round(snapSize(cardCss, dpr) * dpr), 768), 2560);
+  // Width and height come from the same card size and any cap scales both
+  // together. (An earlier floor raised only the width — 740 -> 768 on a
+  // phone — so the image came back 768x556, wider than 4:3, and the shader
+  // squeezed it ~3.5% to fit the card.)
+  const w = Math.round(snapSize(cardCss, dpr) * dpr);
+  const h = Math.round(snapSize(cardCss * RATIO, dpr) * dpr);
+  const cap = Math.min(1, 2560 / w);
   // Ask for the card's exact aspect too. Otherwise cover-fit has to rescale a
   // 1.3329 image into a 1.3342 box, which resamples every row.
-  return { w, h: Math.round(snapSize(cardCss * RATIO, dpr) * dpr) };
+  return { w: Math.round(w * cap), h: Math.round(h * cap) };
 }
 
 /** Snap a world (== CSS pixel) position onto the device-pixel grid. */
@@ -415,7 +421,12 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
             texture.minFilter = THREE.LinearMipmapLinearFilter;
             texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
             material.uniforms.uMap.value = texture;
-            material.uniforms.uTexAspect.value = aspectOf(first);
+            // The aspect of the image actually delivered, not of the original
+            // upload: the CDN crops to the requested box, and cover-fit has to
+            // work from what's really in the texture or it distorts.
+            const img = texture.image as { width?: number; height?: number };
+            material.uniforms.uTexAspect.value =
+              img.width && img.height ? img.width / img.height : aspectOf(first);
             material.uniforms.uHasMap.value = 1;
             needsRender = true;
           });
@@ -461,7 +472,17 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     // Lenis just wrote — two independent rAF loops could leave the cards one
     // frame behind. allowNestedScroll lets the sidebar still scroll natively
     // on short screens. Lenis honours prefers-reduced-motion on its own.
-    const lenis = new Lenis({ autoRaf: false, allowNestedScroll: true });
+    //
+    // syncTouch matters on phones: native touch scrolling moves the page on
+    // the compositor thread while the WebGL cards are drawn on the main
+    // thread a frame later, so hero and cards visibly slip against each other
+    // as the showcase comes in. Letting Lenis drive touch too keeps both in
+    // the same frame.
+    const lenis = new Lenis({
+      autoRaf: false,
+      allowNestedScroll: true,
+      syncTouch: true,
+    });
     lenis.options.gestureOrientation =
       modeRef.current === "3d-2" ? "both" : "vertical";
     lenisRef.current = lenis;
@@ -497,6 +518,12 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     const onTouchStart = () => {
       touching = true;
       snapUntil = 0; // a new touch cancels any glide in progress
+      // With syncTouch, Lenis applies each finger movement to its own record
+      // of the scroll position. If the page moved without Lenis noticing
+      // (scroll restoration on reload, a browser jump), that record is stale
+      // and the first drag would leap there. Re-read it before the drag
+      // starts — unless Lenis is mid-inertia, which this would cut short.
+      if (!lenis.isScrolling) lenis.resize();
     };
     const onTouchEnd = () => {
       touching = false;
@@ -531,6 +558,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       if (
         !viewport.wide &&
         !touching &&
+        // Wait for any touch inertia Lenis is still running to finish.
+        !lenis.isScrolling &&
         now > snapUntil &&
         !settlingRef.current &&
         now - stillSince > SNAP_IDLE_MS &&
@@ -758,6 +787,15 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     setDocHeight(contentHeight(mode, count, currentViewport()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, count]);
+
+  // Lenis caches the page height and only refreshes it from a debounced
+  // ResizeObserver, so right after load (spacer still 0px) or a height change
+  // it can believe there's nothing to scroll and swallow wheel/touch input.
+  // Re-measure as soon as the new spacer height is in the DOM. Dimensions
+  // only — a full resize() would also cancel any scroll in progress.
+  useLayoutEffect(() => {
+    lenisRef.current?.dimensions.resize();
+  }, [docHeight]);
 
   // 3D-2 doesn't exist on mobile; if the window narrows while it's active,
   // fall back to its vertical sibling rather than leave a hidden mode on.

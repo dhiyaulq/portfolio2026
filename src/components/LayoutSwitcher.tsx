@@ -163,7 +163,9 @@ export default function LayoutSwitcher({
     <div className="fixed inset-x-0 bottom-8 z-30 flex justify-center lg:bottom-12 lg:pl-[457px]">
       <motion.div
         className={`${DOCK_CLASS} ${visible ? "" : "pointer-events-none"}`}
-        style={{ ...DOCK_STYLE, transformOrigin: "50% 100%" }}
+        // Pre-promote the layer so the pop-in doesn't have to re-rasterise
+        // the blurred glass on its first frames — noticeable on phones.
+        style={{ ...DOCK_STYLE, transformOrigin: "50% 100%", willChange: "transform, opacity" }}
         initial="hidden"
         animate={visible ? "shown" : "hidden"}
         variants={DOCK_VARIANTS}
