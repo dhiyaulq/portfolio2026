@@ -9,18 +9,16 @@ import type { MediaItem, WorkListItem } from "@/lib/queries";
 import LayoutSwitcher, { type Mode } from "@/components/LayoutSwitcher";
 
 // ---------------------------------------------------------------------------
-// Geometry, straight off the Figma "corousel state" frames (990px column).
-//   1-col  800px wide cards, 24px gaps
-//   2-col  900px total, two 438px cards, 24px gaps
+// Geometry. Desktop values come straight off the Figma "corousel state"
+// frames (990px column); mobile off Figma 155:510 (402px screen).
+//   1-col  800px wide cards
+//   2-col  900px total, two cards side by side
 //   3D     one 700px card centred, neighbours at 500 / 300 / 200
 // Every card is 4:3. All numbers below are CSS pixels; the orthographic camera
 // is set up 1 unit = 1 px so the scene matches the spec exactly.
 // ---------------------------------------------------------------------------
 const SIDEBAR_W = 457;
 const LG_BREAKPOINT = 1024;
-const GAP = 24;
-const TOP_PAD = 48;
-const BOTTOM_PAD = 112;
 const RATIO = 3 / 4; // height = width * RATIO
 
 const ONE_COL_W = 800;
@@ -36,6 +34,28 @@ const SCALE = [1, 0.714, 0.429, 0.286, 0.2];
 // smoother and far cheaper than a multi-tap blur: one texture fetch, not five.
 const BLUR = [0, 0.7, 1.5, 2.1, 2.7];
 const FADE = [1, 0.9, 0.6, 0.28, 0];
+
+type Viewport = { colW: number; colH: number; wide: boolean };
+
+// The switcher sits this far from the bottom of the screen (Tailwind
+// bottom-8 / lg:bottom-12 in LayoutSwitcher) and is 40px tall.
+const SWITCHER_OFFSET = { wide: 48, narrow: 32 };
+const SWITCHER_H = 40;
+// Clear space between the last card and the switcher when a column ends.
+const END_CLEARANCE = 32;
+
+/**
+ * Spacing for the showcase. `stageLift` raises the 3D stage above the true
+ * centre as a fraction of the screen height: the mobile design centres the
+ * focused card at 362 of 782px so the stack clears the switcher.
+ */
+function layoutOf(vp: Viewport) {
+  const offset = vp.wide ? SWITCHER_OFFSET.wide : SWITCHER_OFFSET.narrow;
+  const bottom = offset + SWITCHER_H + END_CLEARANCE;
+  return vp.wide
+    ? { side: 24, top: 48, gap: 24, bottom, radius: 8, stageLift: 0 }
+    : { side: 16, top: 24, gap: 12, bottom, radius: 4, stageLift: 29.3 / 782 };
+}
 
 /** Piecewise-linear lookup, clamped at both ends. */
 function lerpTable(stops: number[], values: number[], at: number) {
@@ -55,9 +75,15 @@ function lerpTable(stops: number[], values: number[], at: number) {
  * Figma's 3D frames assume a ~990px column. On anything narrower the whole rig
  * — card size *and* the neighbour offsets — scales down together, so the
  * composition stays identical instead of the focused card being cropped.
+ * On a 402px phone that's a 370px card, exactly as designed.
  */
-function fit3D(colW: number, colH: number) {
-  return Math.min(1, (colW - 48) / CARD_3D_W, (colH - 96) / (CARD_3D_W * RATIO));
+function fit3D(vp: Viewport) {
+  const { side } = layoutOf(vp);
+  return Math.min(
+    1,
+    (vp.colW - side * 2) / CARD_3D_W,
+    (vp.colH - 96) / (CARD_3D_W * RATIO)
+  );
 }
 
 /**
@@ -74,9 +100,10 @@ function fit3D(colW: number, colH: number) {
  * means no output pixel maps to exactly one texel — every pixel becomes a
  * blend of two and the whole card goes soft. Exact is the only crisp value.
  */
-function textureSizeFor(colW: number, colH: number, dpr: number) {
-  const oneCol = Math.min(ONE_COL_W, Math.max(colW - 48, 240));
-  const focus3D = CARD_3D_W * fit3D(colW, colH);
+function textureSizeFor(vp: Viewport, dpr: number) {
+  const { side } = layoutOf(vp);
+  const oneCol = Math.min(ONE_COL_W, Math.max(vp.colW - side * 2, 240));
+  const focus3D = CARD_3D_W * fit3D(vp);
   const cardCss = Math.max(oneCol, focus3D);
   const w = Math.min(Math.max(Math.round(snapSize(cardCss, dpr) * dpr), 768), 2560);
   // Ask for the card's exact aspect too. Otherwise cover-fit has to rescale a
@@ -112,32 +139,32 @@ type Target = {
   blur: number;
 };
 
-type Viewport = { colW: number; colH: number; is3D: boolean };
-
-/** Card width/height for the flow layouts at a given column width. */
-function flowCardSize(mode: Mode, colW: number) {
-  const usable = Math.max(colW - 48, 240);
+/** Card width/height for the flow layouts. */
+function flowCardSize(mode: Mode, vp: Viewport) {
+  const { side, gap } = layoutOf(vp);
+  const usable = Math.max(vp.colW - side * 2, 240);
   if (mode === "2-col") {
-    const w = (Math.min(TWO_COL_W, usable) - GAP) / 2;
+    const w = (Math.min(TWO_COL_W, usable) - gap) / 2;
     return { w, h: w * RATIO };
   }
   const w = Math.min(ONE_COL_W, usable);
   return { w, h: w * RATIO };
 }
 
-/** Scrollable document height for a mode, so real page scroll still drives it. */
-function contentHeight(mode: Mode, count: number, colW: number, viewportH: number) {
+/** Scrollable height of the showcase for a mode; real page scroll drives it. */
+function contentHeight(mode: Mode, count: number, vp: Viewport) {
   if (mode === "3d-1" || mode === "3d-2") {
-    return Math.max(count - 1, 1) * viewportH * 0.6 + viewportH;
+    return Math.max(count - 1, 1) * vp.colH * 0.6 + vp.colH;
   }
-  const { h } = flowCardSize(mode, colW);
+  const { top, gap, bottom } = layoutOf(vp);
+  const { h } = flowCardSize(mode, vp);
   const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
   // Never shorter than one screen. On mobile the showcase sits below the
-  // hero, and if its content is shorter than the viewport (2-col on a phone
-  // is ~550px) the page can't scroll far enough for the section to reach the
-  // top — the switcher would read that as "still in the hero", hide, and
-  // could never be brought back.
-  return Math.max(TOP_PAD + rows * (h + GAP) - GAP + BOTTOM_PAD, viewportH);
+  // hero, and if its content is shorter than the viewport (2-col on a phone)
+  // the page can't scroll far enough for the section to reach the top — the
+  // switcher would read that as "still in the hero", hide, and could never be
+  // brought back.
+  return Math.max(top + rows * (h + gap) - gap + bottom, vp.colH);
 }
 
 /**
@@ -148,14 +175,15 @@ function contentHeight(mode: Mode, count: number, colW: number, viewportH: numbe
 function focusIndex(mode: Mode, count: number, local: number, vp: Viewport) {
   const last = Math.max(count - 1, 0);
   if (mode === "3d-1" || mode === "3d-2") {
-    const range = Math.max(contentHeight(mode, count, vp.colW, vp.colH) - vp.colH, 1);
+    const range = Math.max(contentHeight(mode, count, vp) - vp.colH, 1);
     return Math.min(Math.max(local / range, 0), 1) * last;
   }
-  const { h } = flowCardSize(mode, vp.colW);
+  const { top, gap } = layoutOf(vp);
+  const { h } = flowCardSize(mode, vp);
   const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
-  // Card centre sits at TOP_PAD + i*pitch + h/2 in section space; it's
-  // centred when that equals the scroll offset + half the viewport.
-  const f = (local + vp.colH / 2 - TOP_PAD - h / 2) / (h + GAP);
+  // Card centre sits at top + i*pitch + h/2 in section space; it's centred
+  // when that equals the scroll offset + half the viewport.
+  const f = (local + vp.colH / 2 - top - h / 2) / (h + gap);
   return Math.min(Math.max(f, 0), Math.max(rows - 1, 0));
 }
 
@@ -167,8 +195,8 @@ function crossings(a: number, b: number) {
 /**
  * Where a card wants to be, in world (== pixel) space with the origin at the
  * centre of the canvas and +y up. This is the single source of truth for all
- * four states; switching mode just changes what this returns, and the render
- * loop eases each plane toward it — which is what produces the transition.
+ * states; switching mode just changes what this returns, and the render loop
+ * eases each plane toward it — which is what produces the transition.
  *
  * `local` is scroll measured from the top of the showcase section, not the
  * page. On desktop the sidebar is fixed, so the two are the same. On mobile
@@ -182,16 +210,17 @@ function targetFor(
   local: number,
   vp: Viewport
 ): Target {
+  const L = layoutOf(vp);
   if (mode === "3d-1" || mode === "3d-2") {
-    const range = Math.max(contentHeight(mode, count, vp.colW, vp.colH) - vp.colH, 1);
+    const range = Math.max(contentHeight(mode, count, vp) - vp.colH, 1);
     const progress = Math.min(Math.max(local / range, 0), 1);
     // The 3D stage behaves like a sticky, screen-tall panel: it scrolls up
     // with the page until the section reaches the top, then stays pinned.
-    const stageShift = Math.min(local, 0);
+    const stageShift = Math.min(local, 0) + L.stageLift * vp.colH;
     const active = progress * Math.max(count - 1, 0);
     const d = index - active;
     const ad = Math.abs(d);
-    const fit = fit3D(vp.colW, vp.colH);
+    const fit = fit3D(vp);
     const scale = lerpTable(DIST, SCALE, ad);
     const w = CARD_3D_W * scale * fit;
     return {
@@ -205,13 +234,13 @@ function targetFor(
     };
   }
 
-  const { w, h } = flowCardSize(mode, vp.colW);
-  const pitch = h + GAP;
+  const { w, h } = flowCardSize(mode, vp);
+  const pitch = h + L.gap;
   const col = mode === "2-col" ? index % 2 : 0;
   const row = mode === "2-col" ? Math.floor(index / 2) : index;
-  const screenTop = TOP_PAD + row * pitch - local;
+  const screenTop = L.top + row * pitch - local;
   return {
-    x: mode === "2-col" ? (col - 0.5) * (w + GAP) : 0,
+    x: mode === "2-col" ? (col - 0.5) * (w + L.gap) : 0,
     y: vp.colH / 2 - (screenTop + h / 2),
     w,
     h,
@@ -296,6 +325,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   // The switcher only shows once the showcase has scrolled to the top — on
   // desktop that's always; on mobile it waits until you're past the hero.
   const [switcherVisible, setSwitcherVisible] = useState(false);
+  // Desktop (sidebar column) vs mobile (hero above). 3D-2 is desktop-only:
+  // on a phone a sideways swipe can't drive it.
+  const [wideLayout, setWideLayout] = useState(true);
   const count = works.length;
   const lastIndex = Math.max(count - 1, 0);
 
@@ -325,12 +357,12 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     const viewport: Viewport = {
       colW: wide ? window.innerWidth - SIDEBAR_W : window.innerWidth,
       colH: window.innerHeight,
-      is3D: false,
+      wide,
     };
     viewportRef.current = viewport;
     // Fixed for the life of the scene: swapping texture sizes mid-session
     // would refetch every image and flash.
-    const tex = textureSizeFor(viewport.colW, viewport.colH, dpr);
+    const tex = textureSizeFor(viewport, dpr);
     let needsRender = true;
     let renderCount = 0;
     let tickCount = 0;
@@ -403,6 +435,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const width = window.innerWidth;
       const wide = width >= LG_BREAKPOINT;
       viewport.colW = wide ? width - SIDEBAR_W : width;
+      viewport.wide = wide;
       viewport.colH =
         coarse && width === lastWidth
           ? Math.max(viewport.colH, window.innerHeight)
@@ -416,9 +449,11 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       camera.top = viewport.colH / 2;
       camera.bottom = -viewport.colH / 2;
       camera.updateProjectionMatrix();
-      setDocHeight(
-        contentHeight(modeRef.current, count, viewport.colW, viewport.colH)
-      );
+      // Corners are 8px on desktop, 4px in the mobile design.
+      const { radius } = layoutOf(viewport);
+      planes.forEach((p) => (p.material.uniforms.uRadius.value = radius));
+      setWideLayout(wide);
+      setDocHeight(contentHeight(modeRef.current, count, viewport));
       needsRender = true;
     };
     // Smooth scrolling for the whole page. Driven from the render loop below
@@ -446,6 +481,30 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     let raf = 0;
     let first = true;
     let shown: boolean | null = null;
+
+    // Magnetic hero/showcase boundary (mobile). If scrolling comes to rest
+    // with the showcase's top edge in the upper part of the screen, glide the
+    // rest of the way so the section sits flush and the switcher is ready;
+    // if the visitor was heading back up, glide to show the hero's end
+    // instead. Outside that zone scrolling is left completely alone.
+    const SNAP_ZONE = 0.4; // fraction of the screen height
+    const SNAP_IDLE_MS = 140;
+    let lastScrollY = window.scrollY;
+    let lastDir = 0;
+    let stillSince = performance.now();
+    let snapUntil = 0;
+    let touching = false;
+    const onTouchStart = () => {
+      touching = true;
+      snapUntil = 0; // a new touch cancels any glide in progress
+    };
+    const onTouchEnd = () => {
+      touching = false;
+      stillSince = performance.now();
+    };
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchend", onTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
     let prev = performance.now();
     // Exponential damping for mode transitions, expressed per second rather
     // than per frame so it feels identical on 60Hz and 120Hz displays.
@@ -463,6 +522,34 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const local = scrollY - origin;
       const m = modeRef.current;
       let motion = 0;
+
+      if (Math.abs(scrollY - lastScrollY) > 0.5) {
+        lastDir = Math.sign(scrollY - lastScrollY);
+        stillSince = now;
+      }
+      lastScrollY = scrollY;
+      if (
+        !viewport.wide &&
+        !touching &&
+        now > snapUntil &&
+        !settlingRef.current &&
+        now - stillSince > SNAP_IDLE_MS &&
+        local < -1 &&
+        local > -viewport.colH * SNAP_ZONE
+      ) {
+        const target = lastDir < 0 ? origin - viewport.colH : origin;
+        // Time-boxed rather than waiting on onComplete: a touch or wheel can
+        // stop Lenis mid-glide, and the callback would then never fire.
+        snapUntil = now + 700;
+        // Re-measure first: Lenis clamps scrollTo against a cached page height
+        // and its own record of where the page is, and either can be stale
+        // here — a stale limit clamps the glide to nowhere.
+        lenis.resize();
+        lenis.scrollTo(Math.max(target, 0), {
+          duration: 0.55,
+          easing: (t) => 1 - Math.pow(1 - t, 3),
+        });
+      }
 
       // Show the switcher once the showcase reaches the top of the screen and
       // hide it again back in the hero. The 24px band stops it flickering if
@@ -579,6 +666,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resizeAll);
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchend", onTouchEnd);
+      window.removeEventListener("touchcancel", onTouchEnd);
       lenis.destroy();
       lenisRef.current = null;
       stopSound();
@@ -596,44 +686,45 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   // Everything here is in section-local scroll and uses the same viewport the
   // render loop lays out against (which ignores address-bar height changes on
   // phones), so the two can't disagree about where a card is.
-  const layoutSize = () => {
+  const currentViewport = (): Viewport => {
     const vp = viewportRef.current;
-    if (vp) return { colW: vp.colW, vh: vp.colH };
+    if (vp) return vp;
     const w = window.innerWidth;
-    return { colW: w >= LG_BREAKPOINT ? w - SIDEBAR_W : w, vh: window.innerHeight };
+    const wide = w >= LG_BREAKPOINT;
+    return { colW: wide ? w - SIDEBAR_W : w, colH: window.innerHeight, wide };
   };
   const sectionTop = () => rootRef.current?.offsetTop ?? 0;
 
   const readAnchor = (m: Mode) => {
-    const { colW, vh } = layoutSize();
+    const vp = currentViewport();
     const local = Math.max(window.scrollY - sectionTop(), 0);
     if (m === "3d-1" || m === "3d-2") {
-      const range = Math.max(contentHeight(m, count, colW, vh) - vh, 1);
+      const range = Math.max(contentHeight(m, count, vp) - vp.colH, 1);
       return Math.round(Math.min(local / range, 1) * lastIndex);
     }
-    const { h } = flowCardSize(m, colW);
-    const row = Math.round(Math.max(local - TOP_PAD + 1, 0) / (h + GAP));
+    const { top, gap } = layoutOf(vp);
+    const { h } = flowCardSize(m, vp);
+    const row = Math.round(Math.max(local - top + 1, 0) / (h + gap));
     return Math.min(m === "2-col" ? row * 2 : row, lastIndex);
   };
 
   /** Section-local scroll offset that puts `anchor` in view in mode `m`. */
   const scrollForAnchor = (m: Mode, anchor: number) => {
-    const { colW, vh } = layoutSize();
-    const total = contentHeight(m, count, colW, vh);
-    const max = Math.max(total - vh, 0);
+    const vp = currentViewport();
+    const max = Math.max(contentHeight(m, count, vp) - vp.colH, 0);
     if (m === "3d-1" || m === "3d-2") {
       const progress = lastIndex > 0 ? anchor / lastIndex : 0;
       return Math.min(progress * max, max);
     }
-    const { h } = flowCardSize(m, colW);
+    const { gap } = layoutOf(vp);
+    const { h } = flowCardSize(m, vp);
     const row = m === "2-col" ? Math.floor(anchor / 2) : anchor;
-    return Math.min(Math.max(TOP_PAD + row * (h + GAP) - TOP_PAD, 0), max);
+    return Math.min(Math.max(row * (h + gap), 0), max);
   };
 
   const handleModeChange = (next: Mode) => {
     const anchor = readAnchor(modeRef.current);
-    const { colW, vh } = layoutSize();
-    const nextHeight = contentHeight(next, count, colW, vh);
+    const nextHeight = contentHeight(next, count, currentViewport());
     const nextScroll = sectionTop() + scrollForAnchor(next, anchor);
 
     // Spacer height, scroll offset and mode must all change in one synchronous
@@ -664,10 +755,16 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   };
 
   useEffect(() => {
-    const { colW, vh } = layoutSize();
-    setDocHeight(contentHeight(mode, count, colW, vh));
+    setDocHeight(contentHeight(mode, count, currentViewport()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, count]);
+
+  // 3D-2 doesn't exist on mobile; if the window narrows while it's active,
+  // fall back to its vertical sibling rather than leave a hidden mode on.
+  useEffect(() => {
+    if (!wideLayout && mode === "3d-2") handleModeChange("3d-1");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wideLayout, mode]);
 
   return (
     <div ref={rootRef} className="w-full flex-1">
@@ -693,6 +790,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           mode={mode}
           onChange={handleModeChange}
           visible={switcherVisible}
+          modes={wideLayout ? undefined : ["1-col", "2-col", "3d-1"]}
         />
       )}
     </div>

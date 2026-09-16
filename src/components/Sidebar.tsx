@@ -63,18 +63,19 @@ function SkillBadge({
 
 export default function Sidebar() {
   return (
-    <aside className="flex min-h-svh w-full shrink-0 flex-col justify-between gap-8 bg-sidebar p-8 sm:p-10 lg:fixed lg:min-h-0 lg:inset-y-0 lg:left-0 lg:h-screen lg:w-[457px] lg:overflow-y-auto">
-      <div className="flex flex-col gap-6 sm:gap-8">
+    <aside className="flex min-h-svh w-full shrink-0 flex-col justify-between gap-8 bg-sidebar p-5 lg:fixed lg:p-10 lg:min-h-0 lg:inset-y-0 lg:left-0 lg:h-screen lg:w-[457px] lg:overflow-y-auto">
+      {/* Section spacing: 40px on mobile (Figma 155:37), 32px on desktop. */}
+      <div className="flex flex-col gap-10 lg:gap-8">
         {/* Figma 127:237 — the logo/intro block and the CTA row are one group
-            with 24px between them, sitting 32px from the sections below. */}
-        <div className="flex flex-col gap-6">
-          {/* Logo + intro (127:238, 16px) */}
-          <div className="flex flex-col gap-4">
+            with 24px between them (16px logo→intro). On mobile (155:38) the
+            logo, intro and CTAs are simply 32px apart. */}
+        <div className="flex flex-col gap-8 lg:gap-6">
+          <div className="flex flex-col gap-8 lg:gap-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/icons/dsign-logo.svg"
               alt="dsign"
-              className="h-[26px] w-[94px] shrink-0 self-start"
+              className="h-6 w-[78px] shrink-0 self-start"
             />
 
             <p className="text-[15px] leading-[23px] tracking-[-0.075px] text-foreground">

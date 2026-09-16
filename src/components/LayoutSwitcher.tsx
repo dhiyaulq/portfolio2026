@@ -132,27 +132,35 @@ export default function LayoutSwitcher({
   mode,
   onChange,
   visible = true,
+  modes,
 }: {
   mode: Mode;
   onChange: (m: Mode) => void;
   /** Whether the showcase is on screen; the dock pops in and out with it. */
   visible?: boolean;
+  /** Which modes to offer (mobile drops 3D-2). Defaults to all four. */
+  modes?: Mode[];
 }) {
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [pill, setPill] = useState({ left: 0, width: 0 });
+  const shown = modes ? MODES.filter((m) => modes.includes(m.id)) : MODES;
+  const shownKey = shown.map((m) => m.id).join(",");
 
   useLayoutEffect(() => {
     const measure = () => {
-      const el = buttonRefs.current[MODES.findIndex((m) => m.id === mode)];
+      const el = buttonRefs.current[shown.findIndex((m) => m.id === mode)];
       if (el) setPill({ left: el.offsetLeft, width: el.offsetWidth });
     };
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [mode]);
+    // shownKey stands in for `shown`, which is a new array every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, shownKey]);
 
   return (
-    <div className="fixed inset-x-0 bottom-12 z-30 flex justify-center lg:pl-[457px]">
+    // 32px from the bottom on mobile (Figma 155:510), 48px on desktop.
+    <div className="fixed inset-x-0 bottom-8 z-30 flex justify-center lg:bottom-12 lg:pl-[457px]">
       <motion.div
         className={`${DOCK_CLASS} ${visible ? "" : "pointer-events-none"}`}
         style={{ ...DOCK_STYLE, transformOrigin: "50% 100%" }}
@@ -171,7 +179,7 @@ export default function LayoutSwitcher({
           transition={PILL_SPRING}
           style={PILL_STYLE}
         />
-        {MODES.map(({ id, label, icon: Icon }, i) => {
+        {shown.map(({ id, label, icon: Icon }, i) => {
           const active = mode === id;
           return (
             <button
