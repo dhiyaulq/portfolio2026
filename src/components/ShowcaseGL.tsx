@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import Lenis from "lenis";
 import { urlFor } from "@/lib/sanity";
+import { playTick, primeTickSound } from "@/lib/tickSound";
 import type { MediaItem, WorkListItem } from "@/lib/queries";
 import LayoutSwitcher, { type Mode } from "@/components/LayoutSwitcher";
 
@@ -134,6 +136,30 @@ function contentHeight(mode: Mode, count: number, colW: number, viewportH: numbe
 }
 
 /**
+ * Continuous "which card is at the centre" value for the current scroll: 2.0
+ * means card (or row) 2 is dead centre, 2.5 means halfway to the next. The
+ * tick sound fires whenever this crosses a whole number.
+ */
+function focusIndex(mode: Mode, count: number, scrollY: number, vp: Viewport) {
+  const last = Math.max(count - 1, 0);
+  if (mode === "3d-1" || mode === "3d-2") {
+    const range = Math.max(contentHeight(mode, count, vp.colW, vp.colH) - vp.colH, 1);
+    return Math.min(Math.max(scrollY / range, 0), 1) * last;
+  }
+  const { h } = flowCardSize(mode, vp.colW);
+  const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
+  // Card centre sits at TOP_PAD + i*pitch + h/2 in page space; it's centred
+  // when that equals scrollY + half the viewport.
+  const f = (scrollY + vp.colH / 2 - TOP_PAD - h / 2) / (h + GAP);
+  return Math.min(Math.max(f, 0), Math.max(rows - 1, 0));
+}
+
+/** How many whole numbers were crossed moving from `a` to `b`. */
+function crossings(a: number, b: number) {
+  return b > a ? Math.floor(b) - Math.floor(a) : Math.ceil(a) - Math.ceil(b);
+}
+
+/**
  * Where a card wants to be, in world (== pixel) space with the origin at the
  * centre of the canvas and +y up. This is the single source of truth for all
  * four states; switching mode just changes what this returns, and the render
@@ -245,6 +271,11 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   const modeRef = useRef<Mode>(mode);
   const anchorRef = useRef(0);
   const spacerRef = useRef<HTMLDivElement>(null);
+  const lenisRef = useRef<Lenis | null>(null);
+  // True from a mode switch until the cards arrive. Only then do the planes
+  // ease on their own; the rest of the time Lenis has already smoothed the
+  // scroll, and easing on top of it again would make the cards trail.
+  const settlingRef = useRef(false);
   const count = works.length;
   const lastIndex = Math.max(count - 1, 0);
 
@@ -358,23 +389,57 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       );
       needsRender = true;
     };
+    // Smooth scrolling for the whole page. Driven from the render loop below
+    // (autoRaf off) so the scroll value the cards read each frame is the one
+    // Lenis just wrote — two independent rAF loops could leave the cards one
+    // frame behind. allowNestedScroll lets the sidebar still scroll natively
+    // on short screens. Lenis honours prefers-reduced-motion on its own.
+    const lenis = new Lenis({ autoRaf: false, allowNestedScroll: true });
+    lenis.options.gestureOrientation =
+      modeRef.current === "3d-2" ? "both" : "vertical";
+    lenisRef.current = lenis;
+
+    const stopSound = primeTickSound();
+    let lastFocus: number | null = null;
+    let lastFocusMode = modeRef.current;
+
+    const resizeAll = () => {
+      resize();
+      // A resize moves every card, which would read as a burst of crossings.
+      lastFocus = null;
+    };
     resize();
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", resizeAll);
 
     let raf = 0;
     let first = true;
     let prev = performance.now();
-    // Exponential damping, expressed per second rather than per frame so the
-    // motion feels identical on 60Hz and 120Hz displays.
+    // Exponential damping for mode transitions, expressed per second rather
+    // than per frame so it feels identical on 60Hz and 120Hz displays.
     const LAMBDA = 9;
 
     const tick = (now: number) => {
       // Clamp dt so returning to a backgrounded tab doesn't teleport cards.
       const dt = Math.min((now - prev) / 1000, 1 / 20);
       prev = now;
+      lenis.raf(now);
       const scrollY = window.scrollY;
       const m = modeRef.current;
       let motion = 0;
+
+      // Tick each time a card passes through the centre. A mode switch jumps
+      // the index outright, so it re-baselines instead of counting.
+      const focus = focusIndex(m, count, scrollY, viewport);
+      if (lastFocus !== null && m === lastFocusMode && crossings(lastFocus, focus) > 0) {
+        playTick();
+      }
+      lastFocus = focus;
+      lastFocusMode = m;
+
+      // Snap on the first frame. During a mode switch, ease so each card
+      // glides to its new slot; otherwise follow Lenis's already-smoothed
+      // scroll exactly.
+      const k = first ? 1 : settlingRef.current ? 1 - Math.exp(-LAMBDA * dt) : 1;
 
       planes.forEach((p, i) => {
         const t = targetFor(m, i, count, scrollY, viewport);
@@ -390,9 +455,6 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           p.load();
         }
 
-        // On the first frame snap; after that ease, so a mode change glides
-        // each plane from wherever it was to wherever it now belongs.
-        const k = first ? 1 : 1 - Math.exp(-LAMBDA * dt);
         const c = p.current ?? { ...t };
         motion = Math.max(
           motion,
@@ -425,6 +487,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       });
 
       first = false;
+      if (settlingRef.current && motion < 0.5) settlingRef.current = false;
       if (process.env.NODE_ENV === "development") {
         (window as unknown as Record<string, unknown>).__gl = {
           mode: m,
@@ -452,7 +515,10 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
 
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("resize", resize);
+      window.removeEventListener("resize", resizeAll);
+      lenis.destroy();
+      lenisRef.current = null;
+      stopSound();
       planes.forEach((p) => {
         p.material.uniforms.uMap.value?.dispose();
         p.material.dispose();
@@ -508,7 +574,19 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     // already clamped scrollTo against the old one.
     anchorRef.current = anchor;
     if (spacerRef.current) spacerRef.current.style.height = `${nextHeight}px`;
-    window.scrollTo({ top: nextScroll, behavior: "instant" });
+    const lenis = lenisRef.current;
+    if (lenis) {
+      // Lenis clamps scrollTo against a cached page height, so it has to
+      // re-measure after the spacer changes or the jump lands short.
+      lenis.resize();
+      lenis.scrollTo(nextScroll, { immediate: true, force: true });
+      // 3D-2 lays the cards out sideways, so a horizontal trackpad swipe
+      // should drive it too.
+      lenis.options.gestureOrientation = next === "3d-2" ? "both" : "vertical";
+    } else {
+      window.scrollTo({ top: nextScroll, behavior: "instant" });
+    }
+    settlingRef.current = true;
     modeRef.current = next;
     setMode(next);
     setDocHeight(nextHeight);
@@ -518,19 +596,6 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     setDocHeight(contentHeight(mode, count, columnWidth(), window.innerHeight));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, count]);
-
-  // 3D-2 lays the cards out horizontally, so a sideways trackpad swipe should
-  // move it. Feed deltaX into the same page scroll that drives everything else.
-  useEffect(() => {
-    if (mode !== "3d-2") return;
-    const onWheel = (e: WheelEvent) => {
-      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-      e.preventDefault();
-      window.scrollBy({ top: e.deltaX, behavior: "instant" });
-    };
-    window.addEventListener("wheel", onWheel, { passive: false });
-    return () => window.removeEventListener("wheel", onWheel);
-  }, [mode]);
 
   return (
     <div className="w-full flex-1">

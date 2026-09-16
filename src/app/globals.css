@@ -2,6 +2,5 @@
 @tailwind components;
 @tailwind utilities;
 
-html {
-  scroll-behavior: smooth;
-}
+/* Smooth scrolling is handled by Lenis (see ShowcaseGL). A CSS
+   scroll-behavior here would animate native scrolls a second time. */

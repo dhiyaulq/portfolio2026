@@ -15,6 +15,10 @@ export default function ChatNowButton({ href }: { href: string }) {
   return (
     <motion.a
       href={href}
+      // Opens Telegram in a new tab so the portfolio stays open behind it.
+      // noopener stops the new page from reaching back into this one.
+      target="_blank"
+      rel="noopener noreferrer"
       initial="idle"
       whileHover="hover"
       whileTap="active"
@@ -24,14 +28,19 @@ export default function ChatNowButton({ href }: { href: string }) {
         active: { backgroundColor: "#f6f6f6", boxShadow: SHADOW_PRESSED },
       }}
       transition={{ duration: 0.15, ease: "easeOut" }}
-      // Padding reduced by the 1px border width so the outer box matches
-      // Figma's 32px height — its stroke is inside-aligned and overlaps the
-      // 8/12/8 padding rather than adding to it.
-      className="flex items-center gap-1.5 rounded-full border border-[rgba(153,153,153,0.15)] py-[7px] pl-[7px] pr-[11px]"
+      className="relative flex items-center gap-1.5 rounded-full py-2 pl-2 pr-3"
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/icons/telegram.png" alt="" className="h-4 w-4" />
       <span className="text-sm font-medium leading-4 text-heading">Chat Now</span>
+      {/* 1px stroke drawn inside the edge (like Figma's inside-aligned
+          stroke) so it doesn't add to the 8/12 padding — the button stays
+          32px tall. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-full"
+        style={{ boxShadow: "inset 0 0 0 1px rgba(153,153,153,0.15)" }}
+      />
     </motion.a>
   );
 }

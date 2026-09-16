@@ -38,11 +38,7 @@ export default function SendEmailButton({ email }: { email: string }) {
       }}
       transition={{ duration: 0.15, ease: "easeOut" }}
       style={{ backgroundImage: FILL_IDLE }}
-      // Figma's 1px stroke is inside-aligned, so the frame is 113x32 with the
-      // stroke overlapping the 12/8/8 padding. A CSS border adds to the box
-      // instead, so the padding is reduced by the border width to land on the
-      // same outer size with the same 12px/8px visual inset.
-      className="relative flex items-center gap-1.5 overflow-hidden rounded-full border border-accent py-[7px] pl-[11px] pr-[7px]"
+      className="relative flex items-center gap-1.5 overflow-hidden rounded-full py-2 pl-3 pr-2"
     >
       <motion.span
         aria-hidden
@@ -53,6 +49,15 @@ export default function SendEmailButton({ email }: { email: string }) {
           active: { opacity: 1, backgroundColor: "#1080d6" },
         }}
         transition={{ duration: 0.15, ease: "easeOut" }}
+      />
+      {/* The 1px stroke, drawn inside the edge like Figma's inside-aligned
+          stroke. A CSS border would add 2px to the box on top of the 8/12
+          padding; this keeps the button at 32px. It sits after the overlay so
+          the pressed #1080d6 fill doesn't paint over it. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-full"
+        style={{ boxShadow: "inset 0 0 0 1px #1389e3" }}
       />
       <span className="relative text-sm font-semibold leading-4 text-white">Send Email</span>
       {/* eslint-disable-next-line @next/next/no-img-element */}
