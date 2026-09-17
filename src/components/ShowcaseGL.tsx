@@ -336,8 +336,10 @@ const FRAG = `
     float aa = max(fwidth(d), 1e-4);
     float mask = 1.0 - smoothstep(-aa, aa, d);
 
+    // No discard for fully transparent pixels: blending already hides them,
+    // and discard disables the early depth/tiling optimisations mobile GPUs
+    // rely on, for every fragment of every card.
     gl_FragColor = vec4(c.rgb, mask * uOpacity);
-    if (gl_FragColor.a < 0.001) discard;
 
     // three.js appends this to its built-in materials but NOT to a raw
     // ShaderMaterial. Without it we'd write linear-light values into an sRGB
@@ -389,8 +391,14 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
     const geometry = new THREE.PlaneGeometry(1, 1);
-    const loader = new THREE.TextureLoader();
-    loader.setCrossOrigin("anonymous");
+    // Phones: cap anisotropic filtering at 4x. The device maximum (often 16x)
+    // buys nothing visible on cards this size and costs every minified fetch.
+    const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+    const anisotropy = Math.min(
+      renderer.capabilities.getMaxAnisotropy(),
+      coarsePointer ? 4 : 16
+    );
+    let disposed = false;
 
     const wide = window.innerWidth >= LG_BREAKPOINT;
     const viewport: Viewport = {
@@ -449,21 +457,39 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         load = () => {
           if (requested) return;
           requested = true;
-          loader.load(url, (texture) => {
-            texture.colorSpace = THREE.SRGBColorSpace;
-            texture.generateMipmaps = true;
-            texture.minFilter = THREE.LinearMipmapLinearFilter;
-            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-            material.uniforms.uMap.value = texture;
-            // The aspect of the image actually delivered, not of the original
-            // upload: the CDN crops to the requested box, and cover-fit has to
-            // work from what's really in the texture or it distorts.
-            const img = texture.image as { width?: number; height?: number };
-            material.uniforms.uTexAspect.value =
-              img.width && img.height ? img.width / img.height : aspectOf(first);
-            material.uniforms.uHasMap.value = 1;
-            needsRender = true;
-          });
+          // Decode off the main thread (img.decode) and upload to the GPU as
+          // soon as it's ready, while the card is still off-screen. Letting
+          // three do both lazily on first draw put a decode + upload stall on
+          // exactly the frame the card scrolled into view.
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.decoding = "async";
+          img.src = url;
+          img
+            .decode()
+            .then(() => {
+              if (disposed) return;
+              const texture = new THREE.Texture(img);
+              texture.colorSpace = THREE.SRGBColorSpace;
+              texture.generateMipmaps = true;
+              texture.minFilter = THREE.LinearMipmapLinearFilter;
+              texture.anisotropy = anisotropy;
+              texture.needsUpdate = true;
+              renderer.initTexture(texture);
+              material.uniforms.uMap.value = texture;
+              // The aspect of the image actually delivered, not of the
+              // original upload: the CDN crops to the requested box, and
+              // cover-fit has to work from what's really in the texture.
+              material.uniforms.uTexAspect.value =
+                img.naturalWidth && img.naturalHeight
+                  ? img.naturalWidth / img.naturalHeight
+                  : aspectOf(first);
+              material.uniforms.uHasMap.value = 1;
+              needsRender = true;
+            })
+            .catch(() => {
+              // Failed to load; the card keeps its placeholder grey.
+            });
         };
       }
 
@@ -499,6 +525,10 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const { radius } = layoutOf(viewport);
       planes.forEach((p) => (p.material.uniforms.uRadius.value = radius));
       setWideLayout(wide);
+      // The nested-scroll check walks every element under the pointer with
+      // getComputedStyle. Only the desktop sidebar can scroll on its own, so
+      // don't pay for it on phones.
+      if (lenisRef.current) lenisRef.current.options.allowNestedScroll = wide;
       setDocHeight(contentHeight(modeRef.current, count, viewport));
       needsRender = true;
     };
@@ -536,6 +566,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
 
     let raf = 0;
     let first = true;
+    let lastFrameScroll = -1;
+    let lastFrameMode = modeRef.current;
+    let lastMotion = Infinity;
     let shown: boolean | null = null;
 
     // Magnetic hero/showcase boundary (mobile). If scrolling comes to rest
@@ -645,6 +678,23 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // scroll exactly.
       const k = first ? 1 : settlingRef.current ? 1 - Math.exp(-LAMBDA * dt) : 1;
 
+      // Nothing can have moved: same scroll, same mode, no mode transition
+      // easing, no resize or new texture, and the cards were already at rest
+      // last frame. Skip recomputing every card's position.
+      if (
+        !first &&
+        scrollY === lastFrameScroll &&
+        m === lastFrameMode &&
+        !settlingRef.current &&
+        !needsRender &&
+        lastMotion <= 0.01
+      ) {
+        tickCount++;
+        return;
+      }
+      lastFrameScroll = scrollY;
+      lastFrameMode = m;
+
       const targets = planes.map((_, i) => targetFor(m, i, count, local, viewport));
       if (!viewport.wide && (m === "3d-1" || m === "3d-2")) {
         centreStack(targets, viewport, local);
@@ -658,7 +708,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         const screenTop = viewport.colH / 2 - t.y - t.h / 2;
         if (
           t.opacity > 0.01 &&
-          screenTop < viewport.colH * 1.5 &&
+          // Three screens of lead time, so the decode + GPU upload has long
+          // finished before a card actually scrolls into view.
+          screenTop < viewport.colH * 3 &&
           screenTop + t.h > -viewport.colH * 0.5
         ) {
           p.load();
@@ -713,6 +765,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // scene costs nothing until the next scroll, resize or mode switch —
       // which is what keeps a full-screen GPU canvas off the battery while
       // someone is just reading the page.
+      lastMotion = motion;
       if (needsRender || motion > 0.01) {
         renderer.render(scene, camera);
         needsRender = false;
@@ -733,6 +786,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     }
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resizeAll);
       window.removeEventListener("touchstart", onTouchStart);

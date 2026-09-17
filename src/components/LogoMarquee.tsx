@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import type { Logo } from "@/lib/siteConfig";
 
 /**
@@ -24,6 +25,21 @@ export default function LogoMarquee({ logos }: { logos: Logo[] }) {
     logos.reduce((sum, l) => sum + l.width, 0) + GAP * logos.length;
   const duration = copyWidth / PX_PER_SECOND;
 
+  // Pause while off screen. On a phone the strip lives in the hero, which is
+  // scrolled away the whole time you're browsing work — no reason to keep
+  // re-rasterising a masked, moving layer nobody can see.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [onScreen, setOnScreen] = useState(true);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([entry]) =>
+      setOnScreen(entry.isIntersecting)
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   const strip = (copy: number) =>
     logos.map((logo) => (
       // eslint-disable-next-line @next/next/no-img-element
@@ -41,6 +57,7 @@ export default function LogoMarquee({ logos }: { logos: Logo[] }) {
 
   return (
     <div
+      ref={rootRef}
       className="relative overflow-hidden"
       style={{
         // Matches the design's fade overlay, which is opaque to 15% and from
@@ -58,6 +75,7 @@ export default function LogoMarquee({ logos }: { logos: Logo[] }) {
           {
             gap: `${GAP}px`,
             "--logo-marquee-duration": `${duration}s`,
+            animationPlayState: onScreen ? "running" : "paused",
           } as React.CSSProperties
         }
       >

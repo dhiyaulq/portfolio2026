@@ -12,6 +12,7 @@
 let ctx: AudioContext | null = null;
 let buffer: AudioBuffer | null = null;
 let lastPlayed = 0;
+let coarsePointer: boolean | undefined;
 
 // Fast flings can cross several cards in one frame; one tick per ~45ms keeps
 // it reading as a ratchet rather than a buzz.
@@ -127,7 +128,9 @@ export function playTick() {
   source.start();
 
   // A tiny haptic pulse where supported (Android). iOS has no vibration API.
-  if (window.matchMedia("(pointer: coarse)").matches) navigator.vibrate?.(4);
+  if (coarsePointer ??= window.matchMedia("(pointer: coarse)").matches) {
+    navigator.vibrate?.(4);
+  }
 }
 
 /** For debugging: "suspended" means the page hasn't had a click yet. */

@@ -1,12 +1,14 @@
 import type { CSSProperties } from "react";
 
 /**
- * Shared "liquid glass" dock styling (Figma 88:826), used by the layout
- * switcher and the sound toggle so the two can never drift apart.
+ * "Liquid glass" dock styling (Figma 88:826) for the layout switcher.
  */
 
+// 12px backdrop blur on phones, 24px from lg up. The blur is recomputed every
+// frame the canvas behind it moves, and its cost grows with the radius — the
+// single most expensive thing on screen for a phone GPU while scrolling.
 export const DOCK_CLASS =
-  "relative flex items-center rounded-full p-1 backdrop-blur-xl backdrop-saturate-150";
+  "relative flex items-center rounded-full p-1 backdrop-blur-md backdrop-saturate-150 lg:backdrop-blur-xl";
 
 export const DOCK_STYLE: CSSProperties = {
   isolation: "isolate",
