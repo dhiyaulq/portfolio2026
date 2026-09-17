@@ -35,7 +35,16 @@ const SCALE = [1, 0.714, 0.429, 0.286, 0.2];
 const BLUR = [0, 0.7, 1.5, 2.1, 2.7];
 const FADE = [1, 0.9, 0.6, 0.28, 0];
 
-type Viewport = { colW: number; colH: number; wide: boolean };
+/**
+ * colW / colH — the canvas. On touch devices colH is the tallest height seen
+ * for this width, so the canvas still covers the screen if the browser's
+ * toolbars collapse.
+ * visH — the height actually visible right now. Anything that has to line
+ * up with the real screen (where the stack is centred, how far a section
+ * can scroll) uses this; using colH there left the 3D stack sitting low and
+ * let short layouts scroll past their end while the toolbars were showing.
+ */
+type Viewport = { colW: number; colH: number; visH: number; wide: boolean };
 
 // The switcher sits this far from the bottom of the screen (Tailwind
 // bottom-8 / lg:bottom-12 in LayoutSwitcher) and is 40px tall.
@@ -44,17 +53,13 @@ const SWITCHER_H = 40;
 // Clear space between the last card and the switcher when a column ends.
 const END_CLEARANCE = 32;
 
-/**
- * Spacing for the showcase. `stageLift` raises the 3D stage above the true
- * centre as a fraction of the screen height: the mobile design centres the
- * focused card at 362 of 782px so the stack clears the switcher.
- */
+/** Spacing for the showcase column, desktop vs mobile. */
 function layoutOf(vp: Viewport) {
   const offset = vp.wide ? SWITCHER_OFFSET.wide : SWITCHER_OFFSET.narrow;
   const bottom = offset + SWITCHER_H + END_CLEARANCE;
   return vp.wide
-    ? { side: 24, top: 48, gap: 24, bottom, radius: 8, stageLift: 0 }
-    : { side: 16, top: 24, gap: 12, bottom, radius: 4, stageLift: 29.3 / 782 };
+    ? { side: 24, top: 48, gap: 24, bottom, radius: 8 }
+    : { side: 16, top: 24, gap: 12, bottom, radius: 4 };
 }
 
 /** Piecewise-linear lookup, clamped at both ends. */
@@ -82,7 +87,7 @@ function fit3D(vp: Viewport) {
   return Math.min(
     1,
     (vp.colW - side * 2) / CARD_3D_W,
-    (vp.colH - 96) / (CARD_3D_W * RATIO)
+    (vp.visH - 96) / (CARD_3D_W * RATIO)
   );
 }
 
@@ -160,7 +165,10 @@ function flowCardSize(mode: Mode, vp: Viewport) {
 /** Scrollable height of the showcase for a mode; real page scroll drives it. */
 function contentHeight(mode: Mode, count: number, vp: Viewport) {
   if (mode === "3d-1" || mode === "3d-2") {
-    return Math.max(count - 1, 1) * vp.colH * 0.6 + vp.colH;
+    // Scroll distance per card is tied to the stable canvas height so the 3D
+    // progress doesn't shift if the toolbars change; the extra screen is the
+    // visible one, so the last card lands exactly at the end.
+    return Math.max(count - 1, 1) * vp.colH * 0.6 + vp.visH;
   }
   const { top, gap, bottom } = layoutOf(vp);
   const { h } = flowCardSize(mode, vp);
@@ -170,7 +178,7 @@ function contentHeight(mode: Mode, count: number, vp: Viewport) {
   // the page can't scroll far enough for the section to reach the top — the
   // switcher would read that as "still in the hero", hide, and could never be
   // brought back.
-  return Math.max(top + rows * (h + gap) - gap + bottom, vp.colH);
+  return Math.max(top + rows * (h + gap) - gap + bottom, vp.visH);
 }
 
 /**
@@ -181,7 +189,7 @@ function contentHeight(mode: Mode, count: number, vp: Viewport) {
 function focusIndex(mode: Mode, count: number, local: number, vp: Viewport) {
   const last = Math.max(count - 1, 0);
   if (mode === "3d-1" || mode === "3d-2") {
-    const range = Math.max(contentHeight(mode, count, vp) - vp.colH, 1);
+    const range = Math.max(contentHeight(mode, count, vp) - vp.visH, 1);
     return Math.min(Math.max(local / range, 0), 1) * last;
   }
   const { top, gap } = layoutOf(vp);
@@ -189,7 +197,7 @@ function focusIndex(mode: Mode, count: number, local: number, vp: Viewport) {
   const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
   // Card centre sits at top + i*pitch + h/2 in section space; it's centred
   // when that equals the scroll offset + half the viewport.
-  const f = (local + vp.colH / 2 - top - h / 2) / (h + gap);
+  const f = (local + vp.visH / 2 - top - h / 2) / (h + gap);
   return Math.min(Math.max(f, 0), Math.max(rows - 1, 0));
 }
 
@@ -218,11 +226,11 @@ function targetFor(
 ): Target {
   const L = layoutOf(vp);
   if (mode === "3d-1" || mode === "3d-2") {
-    const range = Math.max(contentHeight(mode, count, vp) - vp.colH, 1);
+    const range = Math.max(contentHeight(mode, count, vp) - vp.visH, 1);
     const progress = Math.min(Math.max(local / range, 0), 1);
     // The 3D stage behaves like a sticky, screen-tall panel: it scrolls up
     // with the page until the section reaches the top, then stays pinned.
-    const stageShift = Math.min(local, 0) + L.stageLift * vp.colH;
+    const stageShift = Math.min(local, 0);
     const active = progress * Math.max(count - 1, 0);
     const d = index - active;
     const ad = Math.abs(d);
@@ -253,6 +261,31 @@ function targetFor(
     opacity: 1,
     blur: 0,
   };
+}
+
+/**
+ * Mobile 3D: centre the whole visible stack — not just the focused card — in
+ * the free space between the top padding and the switcher's clearance. The
+ * stack is lopsided (on the first card every neighbour sits below it), so
+ * centring only the focused card left it looking low. Computed from the
+ * targets, so it follows the stack smoothly as you scroll through it.
+ */
+function centreStack(targets: Target[], vp: Viewport, local: number) {
+  let top = -Infinity;
+  let bottom = Infinity;
+  for (const t of targets) {
+    if (t.opacity <= 0.01) continue;
+    top = Math.max(top, t.y + t.h / 2); // world space, +y is up
+    bottom = Math.min(bottom, t.y - t.h / 2);
+  }
+  if (!Number.isFinite(top)) return;
+  const L = layoutOf(vp);
+  const areaCentre = (L.top + vp.visH - L.bottom) / 2; // px from screen top
+  // Keep the sticky entrance: before the section reaches the top, the stage
+  // still rides below the hero by the same amount targetFor applied.
+  const desired = vp.colH / 2 - areaCentre + Math.min(local, 0);
+  const dy = desired - (top + bottom) / 2;
+  for (const t of targets) t.y += dy;
 }
 
 const VERT = `
@@ -363,6 +396,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     const viewport: Viewport = {
       colW: wide ? window.innerWidth - SIDEBAR_W : window.innerWidth,
       colH: window.innerHeight,
+      visH: window.innerHeight,
       wide,
     };
     viewportRef.current = viewport;
@@ -451,6 +485,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         coarse && width === lastWidth
           ? Math.max(viewport.colH, window.innerHeight)
           : window.innerHeight;
+      viewport.visH = window.innerHeight;
       lastWidth = width;
       // updateStyle must stay on: without a CSS size the canvas lays itself
       // out at its drawing-buffer size, which is colW * devicePixelRatio.
@@ -564,9 +599,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         !settlingRef.current &&
         now - stillSince > SNAP_IDLE_MS &&
         local < -1 &&
-        local > -viewport.colH * SNAP_ZONE
+        local > -viewport.visH * SNAP_ZONE
       ) {
-        const target = lastDir < 0 ? origin - viewport.colH : origin;
+        const target = lastDir < 0 ? origin - viewport.visH : origin;
         // Time-boxed rather than waiting on onComplete: a touch or wheel can
         // stop Lenis mid-glide, and the callback would then never fire.
         snapUntil = now + 700;
@@ -610,8 +645,13 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // scroll exactly.
       const k = first ? 1 : settlingRef.current ? 1 - Math.exp(-LAMBDA * dt) : 1;
 
+      const targets = planes.map((_, i) => targetFor(m, i, count, local, viewport));
+      if (!viewport.wide && (m === "3d-1" || m === "3d-2")) {
+        centreStack(targets, viewport, local);
+      }
+
       planes.forEach((p, i) => {
-        const t = targetFor(m, i, count, local, viewport);
+        const t = targets[i];
 
         // Pull the texture in just before it's needed, judged on the *target*
         // rather than the eased position so it arrives ahead of the card.
@@ -720,7 +760,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     if (vp) return vp;
     const w = window.innerWidth;
     const wide = w >= LG_BREAKPOINT;
-    return { colW: wide ? w - SIDEBAR_W : w, colH: window.innerHeight, wide };
+    return { colW: wide ? w - SIDEBAR_W : w, colH: window.innerHeight, visH: window.innerHeight, wide };
   };
   const sectionTop = () => rootRef.current?.offsetTop ?? 0;
 
@@ -728,7 +768,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     const vp = currentViewport();
     const local = Math.max(window.scrollY - sectionTop(), 0);
     if (m === "3d-1" || m === "3d-2") {
-      const range = Math.max(contentHeight(m, count, vp) - vp.colH, 1);
+      const range = Math.max(contentHeight(m, count, vp) - vp.visH, 1);
       return Math.round(Math.min(local / range, 1) * lastIndex);
     }
     const { top, gap } = layoutOf(vp);
@@ -740,7 +780,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   /** Section-local scroll offset that puts `anchor` in view in mode `m`. */
   const scrollForAnchor = (m: Mode, anchor: number) => {
     const vp = currentViewport();
-    const max = Math.max(contentHeight(m, count, vp) - vp.colH, 0);
+    const max = Math.max(contentHeight(m, count, vp) - vp.visH, 0);
     if (m === "3d-1" || m === "3d-2") {
       const progress = lastIndex > 0 ? anchor / lastIndex : 0;
       return Math.min(progress * max, max);
