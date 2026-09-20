@@ -237,7 +237,11 @@ function loopCopies(count: number, vp: Viewport, screenH: number) {
     const { h } = flowCardSize(m, probe);
     need = Math.max(need, Math.ceil((probe.visH + h) / flowCycle(m, count, probe)));
   }
-  return Math.min(need, 4);
+  // One spare. While the cards are easing into a new layout the wrap is held
+  // back (see the render loop), which leaves the list standing one repeat
+  // away from where it would otherwise be; the spare covers the screen
+  // meanwhile.
+  return Math.min(need + 1, 5);
 }
 
 /** How far outside the canvas a card waiting to fly in is parked. */
@@ -300,6 +304,18 @@ function modulo(a: number, n: number) {
 /** How many whole numbers were crossed moving from `a` to `b`. */
 function crossings(a: number, b: number) {
   return b > a ? Math.floor(b) - Math.floor(a) : Math.ceil(a) - Math.ceil(b);
+}
+
+/**
+ * How far a work's row has travelled into the current cycle, 0 up to one
+ * cycle. It falls as the page scrolls down and jumps back up by a cycle each
+ * time the row clears the top of the screen — that jump is the loop's wrap.
+ */
+function flowWrapped(mode: Mode, index: number, count: number, local: number, vp: Viewport) {
+  const L = layoutOf(vp);
+  const { h } = flowCardSize(mode, vp);
+  const row = mode === "2-col" ? Math.floor(index / 2) : index;
+  return modulo(L.top + row * (h + L.gap) - local + h, flowCycle(mode, count, vp));
 }
 
 /**
@@ -554,6 +570,10 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       load: () => void;
     };
     const planes: Plane[] = [];
+    // How many repeats each work is standing away from where the wrap would
+    // put it, and where its tile sat last frame. See the render loop.
+    const wrapShift = new Array<number>(count).fill(0);
+    const lastWrapped = new Array<number>(count).fill(NaN);
     // One entry per work, not per quad: the copies of a card all point at the
     // same texture, and it must only be disposed once.
     const textures: THREE.Texture[] = [];
@@ -852,7 +872,18 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // Snap on the first frame. During a mode switch, ease so each card
       // glides to its new slot; otherwise follow Lenis's already-smoothed
       // scroll exactly.
-      const k = first ? 1 : settlingRef.current ? 1 - Math.exp(-LAMBDA * dt) : 1;
+      //
+      // Scrolling mid-glide cuts the glide short — not dead, but down to
+      // about a tenth of a second. Easing toward targets that are themselves
+      // scrolling never arrives: the cards settle into trailing the page by
+      // a fixed distance, the whole layout lagging behind the scroll for as
+      // long as the visitor keeps going, and a loop wrap in the middle of it
+      // sends a card sweeping across the screen to catch up. Landing them
+      // quickly ends both. The switch moves the scroll itself, so that frame
+      // doesn't count as scrolling.
+      const scrollStep = m === lastFrameMode ? Math.abs(scrollY - lastFrameScroll) : 0;
+      const lambda = scrollStep > 1 ? LAMBDA * 5 : LAMBDA;
+      const k = first ? 1 : settlingRef.current ? 1 - Math.exp(-lambda * dt) : 1;
 
       // Nothing can have moved: same scroll, same mode, no mode transition
       // easing, no resize or new texture, and the cards were already at rest
@@ -886,10 +917,41 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
             .sort((a, b) => (b.current?.y ?? 0) - (a.current?.y ?? 0))
             .forEach((p, i) => (p.slot = i));
         }
+        wrapShift.fill(0);
+        lastWrapped.fill(NaN);
+      }
+
+      // The wrap — the moment a work's tile jumps back a whole cycle, putting
+      // its cards one repeat further down the page — is invisible at full
+      // speed, because it happens exactly as the topmost card clears the top
+      // edge and every other copy simply takes the place of the one below it.
+      // That only holds while the cards are sitting on their targets. While
+      // they are easing into a new layout they are not, so a wrap would send
+      // them sweeping across the screen to catch up. So hold the wrap back
+      // for the length of the transition: the work stays one repeat behind,
+      // which is what the spare copy is for. A second wrap means the visitor
+      // is scrolling far enough that the transition has outstayed its welcome
+      // — finish it here instead, with the cards nearly home anyway.
+      if ((m === "1-col" || m === "2-col") && looping(count, viewport)) {
+        const cycle = flowCycle(m, count, viewport);
+        for (let w = 0; w < count; w++) {
+          const wrapped = flowWrapped(m, w, count, local, viewport);
+          const prev = lastWrapped[w];
+          if (!Number.isNaN(prev) && settlingRef.current) {
+            const jump = Math.round((wrapped - prev) / cycle);
+            if (jump !== 0) {
+              if (Math.abs(wrapShift[w] - jump) > 1) settlingRef.current = false;
+              else wrapShift[w] -= jump;
+            }
+          }
+          lastWrapped[w] = wrapped;
+        }
+      } else {
+        lastWrapped.fill(NaN);
       }
 
       const targets = planes.map((p) =>
-        targetFor(m, p.index, p.slot, count, local, viewport)
+        targetFor(m, p.index, p.slot + wrapShift[p.index], count, local, viewport)
       );
 
       // A card that is nowhere near the screen when the layout changes starts
@@ -975,7 +1037,13 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       });
 
       first = false;
-      if (settlingRef.current && motion < 0.5) settlingRef.current = false;
+      // The glide is over once the cards are no further from their places
+      // than the page moves in a frame — the rest is the ordinary one-frame
+      // lag of a scroll, not the transition. Measured against a fixed
+      // threshold it would never be over while the visitor kept scrolling.
+      if (settlingRef.current && motion < Math.max(0.5, scrollStep)) {
+        settlingRef.current = false;
+      }
       if (process.env.NODE_ENV === "development") {
         (window as unknown as Record<string, unknown>).__gl = {
           mode: m,
@@ -985,6 +1053,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           tickCount,
           ticksPlayed,
           focus,
+          settling: settlingRef.current,
+          wrapShift: [...wrapShift],
           // Lenis's own position: unwrapped, so it keeps counting past the end.
           animated: lenis.animatedScroll,
           textures: renderer.info.memory.textures,
