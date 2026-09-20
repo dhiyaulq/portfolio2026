@@ -162,17 +162,112 @@ function flowCardSize(mode: Mode, vp: Viewport) {
   return { w, h: w * RATIO };
 }
 
+/**
+ * Scroll distance that advances the 3D carousel by one card. Tied to the
+ * stable canvas height so the progress doesn't shift if a phone's toolbars do.
+ */
+function cardScroll(vp: Viewport) {
+  return vp.colH * 0.6;
+}
+
+/**
+ * Scroll distance for one full pass through every work in 3D. Passing this
+ * point puts the carousel back exactly where it started, which is what lets
+ * the page rewind by a cycle without anything visibly changing.
+ */
+function cycleLength(count: number, vp: Viewport) {
+  return Math.max(count, 1) * cardScroll(vp);
+}
+
+/** Rows in a flow layout: one per work, or one per pair in 2-col. */
+function flowRows(mode: Mode, count: number) {
+  return mode === "2-col" ? Math.ceil(count / 2) : count;
+}
+
+/**
+ * Scroll distance for one full pass down a flow layout. The layout repeats
+ * exactly over this distance, which is what lets the page rewind by it.
+ */
+function flowCycle(mode: Mode, count: number, vp: Viewport) {
+  const { gap } = layoutOf(vp);
+  const { h } = flowCardSize(mode, vp);
+  return Math.max(flowRows(mode, count), 1) * (h + gap);
+}
+
+/** Scroll distance for one full pass through the works, whatever the layout. */
+function cycleFor(mode: Mode, count: number, vp: Viewport) {
+  return mode === "3d-1" || mode === "3d-2"
+    ? cycleLength(count, vp)
+    : flowCycle(mode, count, vp);
+}
+
+/**
+ * Whether the showcase loops. Desktop only, by request — on a phone the
+ * layouts keep their ends, so a flick still comes to rest somewhere and the
+ * hero stays one scroll-up away.
+ */
+function looping(count: number, vp: Viewport) {
+  return vp.wide && count > 1;
+}
+
+/**
+ * How many copies of each card the scene needs.
+ *
+ * A looping column tiles the works down the page forever, and when that tile
+ * is short the same work has to be on screen twice at once — leaving the top
+ * while its next repeat is already due at the bottom. With six works a 2-col
+ * grid is only a little taller than the screen, so two or three copies are
+ * needed; 1-col is long enough to need one. Copies share a texture per work,
+ * so the extra quads cost a draw call each and nothing to download.
+ *
+ * Sized for the worst case rather than the current window, because the meshes
+ * are built once: the narrowest desktop makes the smallest cards, the shortest
+ * cycle and so the most repeats on screen.
+ */
+function loopCopies(count: number, vp: Viewport, screenH: number) {
+  if (!looping(count, vp)) return 1;
+  const probe: Viewport = {
+    ...vp,
+    colW: LG_BREAKPOINT - SIDEBAR_W,
+    // Headroom over the screen's own height: the scene is built once, and the
+    // window can move to a taller display afterwards.
+    visH: Math.max(vp.visH, screenH) * 1.3,
+  };
+  let need = 1;
+  for (const m of ["1-col", "2-col"] as const) {
+    const { h } = flowCardSize(m, probe);
+    need = Math.max(need, Math.ceil((probe.visH + h) / flowCycle(m, count, probe)));
+  }
+  return Math.min(need, 4);
+}
+
+/**
+ * A little scroll below the loop point. The rewind fires once a whole cycle
+ * has gone by, so the page has to be able to reach that point — and the
+ * bottom of a page is only as precise as window.innerHeight, which browsers
+ * round to whole pixels. Landing a fraction short would strand the loop at
+ * the end of the page. The slack is invisible: the layout repeats, so being
+ * 16px past the loop point looks exactly like being 16px past the start.
+ */
+const LOOP_SLACK = 16;
+
 /** Scrollable height of the showcase for a mode; real page scroll drives it. */
 function contentHeight(mode: Mode, count: number, vp: Viewport) {
+  const loop = looping(count, vp);
   if (mode === "3d-1" || mode === "3d-2") {
-    // Scroll distance per card is tied to the stable canvas height so the 3D
-    // progress doesn't shift if the toolbars change; the extra screen is the
-    // visible one, so the last card lands exactly at the end.
-    return Math.max(count - 1, 1) * vp.colH * 0.6 + vp.visH;
+    // Looping: a full cycle plus one screen, so there's always another card's
+    // worth of scroll below you. Otherwise it ends on the last card.
+    const range = loop
+      ? cycleLength(count, vp) + LOOP_SLACK
+      : Math.max(count - 1, 1) * cardScroll(vp);
+    return range + vp.visH;
   }
+  // A looping column has no end to leave room below, so the usual bottom
+  // clearance doesn't apply; one cycle is all the scroll it ever needs.
+  if (loop) return flowCycle(mode, count, vp) + LOOP_SLACK + vp.visH;
   const { top, gap, bottom } = layoutOf(vp);
   const { h } = flowCardSize(mode, vp);
-  const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
+  const rows = flowRows(mode, count);
   // Never shorter than one screen. On mobile the showcase sits below the
   // hero, and if its content is shorter than the viewport (2-col on a phone)
   // the page can't scroll far enough for the section to reach the top — the
@@ -189,16 +284,23 @@ function contentHeight(mode: Mode, count: number, vp: Viewport) {
 function focusIndex(mode: Mode, count: number, local: number, vp: Viewport) {
   const last = Math.max(count - 1, 0);
   if (mode === "3d-1" || mode === "3d-2") {
-    const range = Math.max(contentHeight(mode, count, vp) - vp.visH, 1);
-    return Math.min(Math.max(local / range, 0), 1) * last;
+    const f = local / cardScroll(vp);
+    // Unbounded while looping: it keeps counting up as the carousel comes
+    // round again, so the tick still fires once per card crossing.
+    return looping(count, vp) ? f : Math.min(Math.max(f, 0), last);
   }
   const { top, gap } = layoutOf(vp);
   const { h } = flowCardSize(mode, vp);
-  const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
+  const rows = flowRows(mode, count);
   // Card centre sits at top + i*pitch + h/2 in section space; it's centred
   // when that equals the scroll offset + half the viewport.
   const f = (local + vp.visH / 2 - top - h / 2) / (h + gap);
   return Math.min(Math.max(f, 0), Math.max(rows - 1, 0));
+}
+
+/** Always-positive modulo, unlike JS's % for negative numbers. */
+function modulo(a: number, n: number) {
+  return ((a % n) + n) % n;
 }
 
 /** How many whole numbers were crossed moving from `a` to `b`. */
@@ -220,19 +322,25 @@ function crossings(a: number, b: number) {
 function targetFor(
   mode: Mode,
   index: number,
+  copy: number,
   count: number,
   local: number,
   vp: Viewport
 ): Target {
   const L = layoutOf(vp);
+  const loop = looping(count, vp);
   if (mode === "3d-1" || mode === "3d-2") {
-    const range = Math.max(contentHeight(mode, count, vp) - vp.visH, 1);
-    const progress = Math.min(Math.max(local / range, 0), 1);
     // The 3D stage behaves like a sticky, screen-tall panel: it scrolls up
     // with the page until the section reaches the top, then stays pinned.
     const stageShift = Math.min(local, 0);
-    const active = progress * Math.max(count - 1, 0);
-    const d = index - active;
+    const raw = local / cardScroll(vp);
+    const active = loop ? raw : Math.min(Math.max(raw, 0), Math.max(count - 1, 0));
+    // Looping, a card sits at whichever repeat is nearest the front, so the
+    // works run on endlessly in both directions. Otherwise the stack simply
+    // starts on the first card and ends on the last.
+    const half = count / 2;
+    const d =
+      loop && count > 0 ? modulo(index - active + half, count) - half : index - active;
     const ad = Math.abs(d);
     const fit = fit3D(vp);
     const scale = lerpTable(DIST, SCALE, ad);
@@ -243,7 +351,16 @@ function targetFor(
       y: (mode === "3d-1" ? -lerpTable(OFFSET_D, OFFSET_Y, d) * fit : 0) + stageShift,
       w,
       h: w * RATIO,
-      opacity: lerpTable(DIST, FADE, ad),
+      // Fade right out before the wrap point. A card at the very back of the
+      // stack is about to reappear at the very front, and without this it
+      // would pop across while still faintly visible.
+      // The stack only needs one card per work. The spare copies the columns
+      // use ride along invisibly on top of the card they duplicate, so a
+      // switch either way is a fade rather than a card appearing from nowhere.
+      opacity:
+        (copy > 0 ? 0 : 1) *
+        lerpTable(DIST, FADE, ad) *
+        (loop && count > 2 ? Math.min(Math.max((half - ad) / 0.75, 0), 1) : 1),
       blur: lerpTable(DIST, BLUR, ad),
     };
   }
@@ -252,13 +369,24 @@ function targetFor(
   const pitch = h + L.gap;
   const col = mode === "2-col" ? index % 2 : 0;
   const row = mode === "2-col" ? Math.floor(index / 2) : index;
-  const screenTop = L.top + row * pitch - local;
+  let screenTop = L.top + row * pitch - local;
+  if (loop) {
+    // Tile the works down the page forever. The wrap puts a card back one
+    // cycle lower at the exact moment it clears the top edge — its bottom
+    // edge on y=0, so nothing is on screen to see jumping — and the copy
+    // below slides into the slot it left. Copies are one cycle apart, which
+    // is what covers the screen when the tile is shorter than it is.
+    const cycle = Math.max(flowRows(mode, count), 1) * pitch;
+    screenTop = modulo(screenTop + h, cycle) - h + copy * cycle;
+  }
   return {
     x: mode === "2-col" ? (col - 0.5) * (w + L.gap) : 0,
     y: vp.colH / 2 - (screenTop + h / 2),
     w,
     h,
-    opacity: 1,
+    // Spare copies only exist for the looping columns; elsewhere they sit
+    // invisibly on the card they duplicate.
+    opacity: loop || copy === 0 ? 1 : 0,
     blur: 0,
   };
 }
@@ -415,24 +543,43 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     let renderCount = 0;
     let tickCount = 0;
 
-    const planes = works.map((work) => {
-      const material = new THREE.ShaderMaterial({
-        vertexShader: VERT,
-        fragmentShader: FRAG,
-        transparent: true,
-        depthWrite: false,
-        uniforms: {
-          uMap: { value: null },
-          uOpacity: { value: 1 },
-          uBlur: { value: 0 },
-          uTexAspect: { value: 4 / 3 },
-          uSize: { value: new THREE.Vector2(1, 1) },
-          uRadius: { value: 8 },
-          uHasMap: { value: 0 },
-        },
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      scene.add(mesh);
+    // Each work gets `copies` quads. Only the looping columns ever use more
+    // than the first; see loopCopies.
+    const copies = loopCopies(count, viewport, window.screen?.height ?? 0);
+    type Plane = {
+      mesh: THREE.Mesh;
+      material: THREE.ShaderMaterial;
+      index: number;
+      copy: number;
+      current: Target | null;
+      src: string;
+      load: () => void;
+    };
+    const planes: Plane[] = [];
+    // One entry per work, not per quad: the copies of a card all point at the
+    // same texture, and it must only be disposed once.
+    const textures: THREE.Texture[] = [];
+
+    works.forEach((work, index) => {
+      const materials = Array.from(
+        { length: copies },
+        () =>
+          new THREE.ShaderMaterial({
+            vertexShader: VERT,
+            fragmentShader: FRAG,
+            transparent: true,
+            depthWrite: false,
+            uniforms: {
+              uMap: { value: null },
+              uOpacity: { value: 1 },
+              uBlur: { value: 0 },
+              uTexAspect: { value: 4 / 3 },
+              uSize: { value: new THREE.Vector2(1, 1) },
+              uRadius: { value: 8 },
+              uHasMap: { value: 0 },
+            },
+          })
+      );
 
       // Textures come straight from the Sanity CDN — same data pipeline as
       // before, so publishing in Studio still just works.
@@ -476,15 +623,19 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
               texture.anisotropy = anisotropy;
               texture.needsUpdate = true;
               renderer.initTexture(texture);
-              material.uniforms.uMap.value = texture;
+              textures.push(texture);
               // The aspect of the image actually delivered, not of the
               // original upload: the CDN crops to the requested box, and
               // cover-fit has to work from what's really in the texture.
-              material.uniforms.uTexAspect.value =
+              const texAspect =
                 img.naturalWidth && img.naturalHeight
                   ? img.naturalWidth / img.naturalHeight
                   : aspectOf(first);
-              material.uniforms.uHasMap.value = 1;
+              materials.forEach((mat) => {
+                mat.uniforms.uMap.value = texture;
+                mat.uniforms.uTexAspect.value = texAspect;
+                mat.uniforms.uHasMap.value = 1;
+              });
               needsRender = true;
             })
             .catch(() => {
@@ -493,7 +644,11 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         };
       }
 
-      return { mesh, material, current: null as Target | null, src, load };
+      materials.forEach((material, copy) => {
+        const mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+        planes.push({ mesh, material, index, copy, current: null, src, load });
+      });
     });
 
     // Phones resize the viewport whenever the address bar slides in or out,
@@ -610,12 +765,44 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const dt = Math.min((now - prev) / 1000, 1 / 20);
       prev = now;
       lenis.raf(now);
-      const scrollY = window.scrollY;
+      let scrollY = window.scrollY;
       // Scroll measured from the top of the showcase section (0 on desktop,
       // the hero's height on mobile). offsetTop is cheap when layout is clean.
       const origin = rootRef.current?.offsetTop ?? 0;
-      const local = scrollY - origin;
+      let local = scrollY - origin;
       const m = modeRef.current;
+
+      // Infinite scroll: once a full pass through the works has gone by,
+      // rewind the page by exactly one pass. Every layout repeats over that
+      // distance, so the cards are already drawn where the rewind puts them
+      // and nothing visibly changes. Lenis's own position is moved with it
+      // rather than calling scrollTo, which would cancel the fling you're in
+      // the middle of.
+      const cycle = looping(count, viewport) ? cycleFor(m, count, viewport) : 0;
+      if (cycle > 0 && local >= cycle) {
+        const by = Math.floor(local / cycle) * cycle;
+        // Rewind from where the page actually is. Lenis's own record can be
+        // behind (it learns about scrolls it didn't make from scroll
+        // events), and subtracting from a stale value would land somewhere
+        // else entirely. Carrying the *remaining* distance to its target
+        // over keeps an in-flight fling going at the same speed.
+        const remaining = lenis.targetScroll - lenis.animatedScroll;
+        const landing = scrollY - by;
+        lenis.animatedScroll = landing;
+        lenis.targetScroll = landing + remaining;
+        window.scrollTo(0, landing);
+        scrollY -= by;
+        local -= by;
+        lastScrollY -= by;
+        // Keep the tick's card counter in step, or the rewind would read as
+        // a burst of cards crossing the centre.
+        if (lastFocus !== null) {
+          lastFocus =
+            m === "3d-1" || m === "3d-2"
+              ? lastFocus - by / cardScroll(viewport)
+              : null;
+        }
+      }
       let motion = 0;
 
       if (Math.abs(scrollY - lastScrollY) > 0.5) {
@@ -695,13 +882,22 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       lastFrameScroll = scrollY;
       lastFrameMode = m;
 
-      const targets = planes.map((_, i) => targetFor(m, i, count, local, viewport));
+      const targets = planes.map((p) =>
+        targetFor(m, p.index, p.copy, count, local, viewport)
+      );
       if (!viewport.wide && (m === "3d-1" || m === "3d-2")) {
         centreStack(targets, viewport, local);
       }
 
       planes.forEach((p, i) => {
         const t = targets[i];
+        if (t.opacity <= 0.002 && (p.current?.opacity ?? 0) <= 0.002) {
+          // Parked copy, and it wasn't visible last frame either — nothing to
+          // ease and nothing to draw.
+          p.current = { ...t };
+          p.mesh.visible = false;
+          return;
+        }
 
         // Pull the texture in just before it's needed, judged on the *target*
         // rather than the eased position so it arrives ahead of the card.
@@ -738,7 +934,14 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         // edge and glyph in the image — the difference between "HD" and not.
         const sw = snapSize(c.w, dpr);
         const sh = snapSize(c.h, dpr);
-        p.mesh.position.set(snap(c.x, dpr), snap(c.y, dpr), -Math.abs(i) * 0.001);
+        p.mesh.position.set(snap(c.x, dpr), snap(c.y, dpr), -p.index * 0.001);
+        // Don't submit cards nobody can see: a parked copy, or one scrolled
+        // off the canvas. The GPU would clip them anyway, but a looping
+        // column keeps several of each off screen at all times.
+        p.mesh.visible =
+          c.opacity > 0.002 &&
+          Math.abs(c.y) - c.h / 2 < viewport.colH / 2 + 8 &&
+          Math.abs(c.x) - c.w / 2 < viewport.colW / 2 + 8;
         p.mesh.scale.set(sw, sh, 1);
         // Nearer-to-focus cards draw on top.
         p.mesh.renderOrder = Math.round(c.w);
@@ -795,10 +998,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       lenis.destroy();
       lenisRef.current = null;
       stopSound();
-      planes.forEach((p) => {
-        p.material.uniforms.uMap.value?.dispose();
-        p.material.dispose();
-      });
+      planes.forEach((p) => p.material.dispose());
+      textures.forEach((t) => t.dispose());
       geometry.dispose();
       renderer.dispose();
       mount.removeChild(renderer.domElement);
@@ -821,13 +1022,18 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   const readAnchor = (m: Mode) => {
     const vp = currentViewport();
     const local = Math.max(window.scrollY - sectionTop(), 0);
+    const loop = looping(count, vp);
     if (m === "3d-1" || m === "3d-2") {
-      const range = Math.max(contentHeight(m, count, vp) - vp.visH, 1);
-      return Math.round(Math.min(local / range, 1) * lastIndex);
+      const i = Math.round(local / cardScroll(vp));
+      // Looping, the anchor is whichever card is currently in front.
+      return loop ? modulo(i, Math.max(count, 1)) : Math.min(Math.max(i, 0), lastIndex);
     }
     const { top, gap } = layoutOf(vp);
     const { h } = flowCardSize(m, vp);
-    const row = Math.round(Math.max(local - top + 1, 0) / (h + gap));
+    let row = Math.round(Math.max(local - top + 1, 0) / (h + gap));
+    // Same again for a looping column: the row at the top of the screen is
+    // the scrolled distance wrapped back into the list.
+    if (loop) row = modulo(row, Math.max(flowRows(m, count), 1));
     return Math.min(m === "2-col" ? row * 2 : row, lastIndex);
   };
 
@@ -835,10 +1041,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   const scrollForAnchor = (m: Mode, anchor: number) => {
     const vp = currentViewport();
     const max = Math.max(contentHeight(m, count, vp) - vp.visH, 0);
-    if (m === "3d-1" || m === "3d-2") {
-      const progress = lastIndex > 0 ? anchor / lastIndex : 0;
-      return Math.min(progress * max, max);
-    }
+    if (m === "3d-1" || m === "3d-2") return anchor * cardScroll(vp);
     const { gap } = layoutOf(vp);
     const { h } = flowCardSize(m, vp);
     const row = m === "2-col" ? Math.floor(anchor / 2) : anchor;
