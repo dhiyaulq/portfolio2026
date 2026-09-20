@@ -176,7 +176,10 @@ function cardScroll(vp: Viewport) {
  * the page rewind by a cycle without anything visibly changing.
  */
 function cycleLength(count: number, vp: Viewport) {
-  return Math.max(count, 1) * cardScroll(vp);
+  // Whole pixels: the page is exactly this tall plus a screen, and Lenis wraps
+  // the scroll at that limit. A fractional cycle would leave the wrap point a
+  // fraction away from where the layout actually repeats.
+  return Math.round(Math.max(count, 1) * cardScroll(vp));
 }
 
 /** Rows in a flow layout: one per work, or one per pair in 2-col. */
@@ -191,14 +194,10 @@ function flowRows(mode: Mode, count: number) {
 function flowCycle(mode: Mode, count: number, vp: Viewport) {
   const { gap } = layoutOf(vp);
   const { h } = flowCardSize(mode, vp);
-  return Math.max(flowRows(mode, count), 1) * (h + gap);
-}
-
-/** Scroll distance for one full pass through the works, whatever the layout. */
-function cycleFor(mode: Mode, count: number, vp: Viewport) {
-  return mode === "3d-1" || mode === "3d-2"
-    ? cycleLength(count, vp)
-    : flowCycle(mode, count, vp);
+  // Whole pixels, so the page's scroll limit and the point where the column
+  // repeats are the same number. The rounding lands on one gap in the list,
+  // which is half a pixel taller or shorter than the rest.
+  return Math.round(Math.max(flowRows(mode, count), 1) * (h + gap));
 }
 
 /**
@@ -241,15 +240,8 @@ function loopCopies(count: number, vp: Viewport, screenH: number) {
   return Math.min(need, 4);
 }
 
-/**
- * A little scroll below the loop point. The rewind fires once a whole cycle
- * has gone by, so the page has to be able to reach that point — and the
- * bottom of a page is only as precise as window.innerHeight, which browsers
- * round to whole pixels. Landing a fraction short would strand the loop at
- * the end of the page. The slack is invisible: the layout repeats, so being
- * 16px past the loop point looks exactly like being 16px past the start.
- */
-const LOOP_SLACK = 16;
+/** How far outside the canvas a card waiting to fly in is parked. */
+const EDGE_PAD = 24;
 
 /** Scrollable height of the showcase for a mode; real page scroll drives it. */
 function contentHeight(mode: Mode, count: number, vp: Viewport) {
@@ -257,14 +249,16 @@ function contentHeight(mode: Mode, count: number, vp: Viewport) {
   if (mode === "3d-1" || mode === "3d-2") {
     // Looping: a full cycle plus one screen, so there's always another card's
     // worth of scroll below you. Otherwise it ends on the last card.
+    // Looping, the page is exactly one cycle long: Lenis wraps the scroll at
+    // that limit, and the layout repeats over it, so the wrap is invisible.
     const range = loop
-      ? cycleLength(count, vp) + LOOP_SLACK
+      ? cycleLength(count, vp)
       : Math.max(count - 1, 1) * cardScroll(vp);
     return range + vp.visH;
   }
   // A looping column has no end to leave room below, so the usual bottom
   // clearance doesn't apply; one cycle is all the scroll it ever needs.
-  if (loop) return flowCycle(mode, count, vp) + LOOP_SLACK + vp.visH;
+  if (loop) return flowCycle(mode, count, vp) + vp.visH;
   const { top, gap, bottom } = layoutOf(vp);
   const { h } = flowCardSize(mode, vp);
   const rows = flowRows(mode, count);
@@ -322,7 +316,8 @@ function crossings(a: number, b: number) {
 function targetFor(
   mode: Mode,
   index: number,
-  copy: number,
+  /** Which repeat of the list this quad stands in; 0 is the one the 3D stack uses. */
+  slot: number,
   count: number,
   local: number,
   vp: Viewport
@@ -358,7 +353,7 @@ function targetFor(
       // use ride along invisibly on top of the card they duplicate, so a
       // switch either way is a fade rather than a card appearing from nowhere.
       opacity:
-        (copy > 0 ? 0 : 1) *
+        (slot > 0 ? 0 : 1) *
         lerpTable(DIST, FADE, ad) *
         (loop && count > 2 ? Math.min(Math.max((half - ad) / 0.75, 0), 1) : 1),
       blur: lerpTable(DIST, BLUR, ad),
@@ -376,8 +371,8 @@ function targetFor(
     // edge on y=0, so nothing is on screen to see jumping — and the copy
     // below slides into the slot it left. Copies are one cycle apart, which
     // is what covers the screen when the tile is shorter than it is.
-    const cycle = Math.max(flowRows(mode, count), 1) * pitch;
-    screenTop = modulo(screenTop + h, cycle) - h + copy * cycle;
+    const cycle = flowCycle(mode, count, vp);
+    screenTop = modulo(screenTop + h, cycle) - h + slot * cycle;
   }
   return {
     x: mode === "2-col" ? (col - 0.5) * (w + L.gap) : 0,
@@ -386,7 +381,7 @@ function targetFor(
     h,
     // Spare copies only exist for the looping columns; elsewhere they sit
     // invisibly on the card they duplicate.
-    opacity: loop || copy === 0 ? 1 : 0,
+    opacity: loop || slot === 0 ? 1 : 0,
     blur: 0,
   };
 }
@@ -542,6 +537,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     let needsRender = true;
     let renderCount = 0;
     let tickCount = 0;
+    let ticksPlayed = 0;
 
     // Each work gets `copies` quads. Only the looping columns ever use more
     // than the first; see loopCopies.
@@ -550,7 +546,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       mesh: THREE.Mesh;
       material: THREE.ShaderMaterial;
       index: number;
-      copy: number;
+      /** Which repeat of the list this quad currently stands in. Reassigned on
+       *  a layout change so each quad takes the nearest one. */
+      slot: number;
       current: Target | null;
       src: string;
       load: () => void;
@@ -647,7 +645,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       materials.forEach((material, copy) => {
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
-        planes.push({ mesh, material, index, copy, current: null, src, load });
+        planes.push({ mesh, material, index, slot: copy, current: null, src, load });
       });
     });
 
@@ -683,7 +681,11 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // The nested-scroll check walks every element under the pointer with
       // getComputedStyle. Only the desktop sidebar can scroll on its own, so
       // don't pay for it on phones.
-      if (lenisRef.current) lenisRef.current.options.allowNestedScroll = wide;
+      if (lenisRef.current) {
+        lenisRef.current.options.allowNestedScroll = wide;
+        // Phones don't loop, so the page keeps its ends there.
+        lenisRef.current.options.infinite = looping(count, viewport);
+      }
       setDocHeight(contentHeight(modeRef.current, count, viewport));
       needsRender = true;
     };
@@ -702,6 +704,12 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       autoRaf: false,
       allowNestedScroll: true,
       syncTouch: true,
+      // Lenis's own infinite mode: it keeps its scroll position running on
+      // past the end of the page and wraps what it writes to the window, so
+      // the loop never interrupts a fling. Doing this by hand — rewinding the
+      // page and moving Lenis's position with it — looked right but fought
+      // the animation Lenis was already running, and re-fired every frame.
+      infinite: looping(count, viewport),
     });
     lenis.options.gestureOrientation =
       modeRef.current === "3d-2" ? "both" : "vertical";
@@ -765,44 +773,15 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const dt = Math.min((now - prev) / 1000, 1 / 20);
       prev = now;
       lenis.raf(now);
-      let scrollY = window.scrollY;
+      // Where the page actually is. When the showcase loops, this is already
+      // wrapped into [0, one cycle) — Lenis writes the wrapped value.
+      const scrollY = window.scrollY;
       // Scroll measured from the top of the showcase section (0 on desktop,
       // the hero's height on mobile). offsetTop is cheap when layout is clean.
       const origin = rootRef.current?.offsetTop ?? 0;
-      let local = scrollY - origin;
+      const local = scrollY - origin;
       const m = modeRef.current;
 
-      // Infinite scroll: once a full pass through the works has gone by,
-      // rewind the page by exactly one pass. Every layout repeats over that
-      // distance, so the cards are already drawn where the rewind puts them
-      // and nothing visibly changes. Lenis's own position is moved with it
-      // rather than calling scrollTo, which would cancel the fling you're in
-      // the middle of.
-      const cycle = looping(count, viewport) ? cycleFor(m, count, viewport) : 0;
-      if (cycle > 0 && local >= cycle) {
-        const by = Math.floor(local / cycle) * cycle;
-        // Rewind from where the page actually is. Lenis's own record can be
-        // behind (it learns about scrolls it didn't make from scroll
-        // events), and subtracting from a stale value would land somewhere
-        // else entirely. Carrying the *remaining* distance to its target
-        // over keeps an in-flight fling going at the same speed.
-        const remaining = lenis.targetScroll - lenis.animatedScroll;
-        const landing = scrollY - by;
-        lenis.animatedScroll = landing;
-        lenis.targetScroll = landing + remaining;
-        window.scrollTo(0, landing);
-        scrollY -= by;
-        local -= by;
-        lastScrollY -= by;
-        // Keep the tick's card counter in step, or the rewind would read as
-        // a burst of cards crossing the centre.
-        if (lastFocus !== null) {
-          lastFocus =
-            m === "3d-1" || m === "3d-2"
-              ? lastFocus - by / cardScroll(viewport)
-              : null;
-        }
-      }
       let motion = 0;
 
       if (Math.abs(scrollY - lastScrollY) > 0.5) {
@@ -848,7 +827,16 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // where cards click through one at a time like a dial; in the column
       // layouts it felt disconnected from the motion. A mode switch jumps the
       // index outright, so it re-baselines instead of counting.
-      const focus = focusIndex(m, count, local, viewport);
+      // Count card crossings against Lenis's own position, which runs on past
+      // the end of the page instead of wrapping. Measured against the wrapped
+      // page scroll, coming round the loop would read as every card crossing
+      // the centre at once.
+      const focus = focusIndex(
+        m,
+        count,
+        looping(count, viewport) ? lenis.animatedScroll - origin : local,
+        viewport
+      );
       if (
         (m === "3d-1" || m === "3d-2") &&
         lastFocus !== null &&
@@ -856,6 +844,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         crossings(lastFocus, focus) > 0
       ) {
         playTick();
+        ticksPlayed++;
       }
       lastFocus = focus;
       lastFocusMode = m;
@@ -879,12 +868,47 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         tickCount++;
         return;
       }
+      const modeChanged = m !== lastFrameMode;
       lastFrameScroll = scrollY;
       lastFrameMode = m;
 
+      // Changing layout moves every card at once. The copies of a work are
+      // interchangeable — same image, same size — so before working out where
+      // they are going, hand each quad the repeat it is already nearest.
+      // Otherwise a card can set off across several screens to reach a slot an
+      // identical copy of it was already standing beside, which is what the
+      // switch looked like: cards flying past each other from off screen.
+      if (copies > 1 && modeChanged) {
+        for (let w = 0; w < count; w++) {
+          planes
+            .slice(w * copies, (w + 1) * copies)
+            // World +y is up, so this is topmost first, matching slot order.
+            .sort((a, b) => (b.current?.y ?? 0) - (a.current?.y ?? 0))
+            .forEach((p, i) => (p.slot = i));
+        }
+      }
+
       const targets = planes.map((p) =>
-        targetFor(m, p.index, p.copy, count, local, viewport)
+        targetFor(m, p.index, p.slot, count, local, viewport)
       );
+
+      // A card that is nowhere near the screen when the layout changes starts
+      // its journey from just outside the nearest edge instead of from where
+      // it happens to be parked. The layouts loop, so a quad can be several
+      // screens above or below — easing it in from there sent it streaking
+      // across the viewport. Moving it first is invisible: it is off screen
+      // either way, and the flight it then makes is the one it always made,
+      // in from the edge.
+      if (modeChanged) {
+        const half = viewport.colH / 2;
+        planes.forEach((p) => {
+          const c = p.current;
+          if (!c) return;
+          const top = half - c.y - c.h / 2;
+          if (top > viewport.colH) c.y = half - (viewport.colH + EDGE_PAD + c.h / 2);
+          else if (top + c.h < 0) c.y = half + c.h / 2 + EDGE_PAD;
+        });
+      }
       if (!viewport.wide && (m === "3d-1" || m === "3d-2")) {
         centreStack(targets, viewport, local);
       }
@@ -959,6 +983,10 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           viewport: { ...viewport },
           renderCount,
           tickCount,
+          ticksPlayed,
+          focus,
+          // Lenis's own position: unwrapped, so it keeps counting past the end.
+          animated: lenis.animatedScroll,
           textures: renderer.info.memory.textures,
           sound: tickSoundState(),
           planes: planes.map((p) => ({ ...p.current, src: p.src })),
@@ -986,6 +1014,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // requestAnimationFrame is paused) without queueing extra loops.
       (window as unknown as Record<string, unknown>).__glStep = () =>
         frame(performance.now());
+      // Lets a test put the scroll exactly where it wants it, the same way the
+      // page does — a plain window.scrollTo goes behind Lenis's back.
+      (window as unknown as Record<string, unknown>).__lenis = lenis;
     }
 
     return () => {
