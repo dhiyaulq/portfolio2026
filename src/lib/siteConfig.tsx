@@ -44,7 +44,7 @@ const INSET_MONITOR = { w: 11.6667, h: 11.9583 };
 
 export const siteConfig = {
   name: "Dhiya",
-  bio: "I’m Dhiya, a product designer located in Indonesia. Partnering with forward-thinking teams to create thoughtful interfaces, websites, and brand identities designed for lasting growth",
+  bio: "I’m Dhiya, a designer based in Indonesia, partnering with forward-thinking teams to create thoughtful interfaces, websites, and brand identities designed for lasting growth.",
   email: "dhiyaulhaqmahmud@gmail.com",
   chatUrl: "https://t.me/dsignspace",
   copyright: "© 2026, Dhiya Ulhaq Mahmud.",
