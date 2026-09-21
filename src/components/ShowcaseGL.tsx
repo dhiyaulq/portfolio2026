@@ -54,10 +54,13 @@ const STACK_FADE = [1, 1, 0.8, 0.6, 0.4, 0.2, 0];
 // GPU a fraction of the texel traffic and looks identical at that size.
 const STACK_BLUR = [0, 0.4, 0.9, 1.4, 1.8, 2.1, 2.4];
 
-// Dealing a card takes this much of a scroll step; the deck closes up over
-// what's left. The card is off the screen by the end of it — it clears at
-// about 94% of its travel — so nothing moves up until it has gone.
-const DEAL_SPLIT = 0.45;
+// A card doesn't lift the moment you start scrolling: the first fifth of a
+// step is dead, so sending one away takes a deliberate push rather than the
+// deck answering the smallest nudge. What's left of the step carries both the
+// card on its way out and the one behind it growing into its place — the two
+// run together, start and finish, so the deck feels like one movement rather
+// than a handover.
+const DEAL_LEAD = 0.2;
 // The path of a card being dealt, as a fraction of its journey. Halfway is
 // the pose in the design (173:340); the end is off the top of the screen.
 const OUT_T = [0, 0.5, 1];
@@ -291,9 +294,13 @@ function targetFor(
     const leaving = Math.floor(raw);
     const step = raw - leaving;
 
+    // Nothing moves until the lead-in is used up; after that the whole step
+    // is one movement, shared by the card leaving and the deck closing.
+    const move = Math.min(Math.max((step - DEAL_LEAD) / (1 - DEAL_LEAD), 0), 1);
+
     if (index <= leaving) {
       // On its way off the top of the screen, or already gone.
-      const out = index < leaving ? 1 : Math.min(step / DEAL_SPLIT, 1);
+      const out = index < leaving ? 1 : move;
       const w = CARD_3D_W * lerpTable(OUT_T, OUT_SCALE, out) * fit;
       // Far enough to clear the top edge on any screen: the travel the design
       // uses at full size, or the height of the canvas, whichever is more.
@@ -312,12 +319,9 @@ function targetFor(
       };
     }
 
-    // Still on the deck. Nothing moves up until the dealt card has gone —
-    // and then it moves at once. Eased out, so the deck answers the moment
-    // the card clears rather than drifting up behind it.
-    const closingRaw = Math.max((step - DEAL_SPLIT) / (1 - DEAL_SPLIT), 0);
-    const closing = 1 - (1 - closingRaw) * (1 - closingRaw);
-    const depth = index - leaving - closing;
+    // Still on the deck, rising into the place of the card on its way out —
+    // over exactly the same stretch of scroll, so the two move as one.
+    const depth = index - leaving - move;
     const w = CARD_3D_W * lerpTable(STACK_D, STACK_SCALE, depth) * fit;
     return {
       x: 0,
@@ -792,20 +796,14 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
             sounds.tick++;
           }
         } else if (m === "card") {
-          // The deck sounds when something actually happens to a card, and
-          // that is at a different point of the scroll in each direction.
-          // Dealing: the card comes off the deck partway through the step —
-          // that is the sound, in step with the deck closing behind it, not
-          // the start of the scroll that sets it moving. Gathering: the card
-          // lands back on the pile at the end of its return.
-          if (focus > lastFocus) {
-            if (crossings(lastFocus - DEAL_SPLIT, focus - DEAL_SPLIT) > 0) {
-              playCard("deal");
-              sounds.deal++;
-            }
-          } else if (crossings(lastFocus, focus) > 0) {
-            playCard("gather");
-            sounds.gather++;
+          // The sound is the card leaving the deck, which is the end of the
+          // lead-in, not the start of the scroll that sets it moving.
+          // Scrolling back, the same point of the step is where the card
+          // touches down again.
+          if (crossings(lastFocus - DEAL_LEAD, focus - DEAL_LEAD) > 0) {
+            const kind = focus > lastFocus ? "deal" : "gather";
+            playCard(kind);
+            sounds[kind]++;
           }
         }
       }
