@@ -41,7 +41,12 @@ const SCALE = [1, 0.714, 0.429, 0.286, 0.2];
 // Mip-level bias for the receding 3D cards. Sampling a blurrier mipmap is both
 // smoother and far cheaper than a multi-tap blur: one texture fetch, not five.
 const BLUR = [0, 0.7, 1.5, 2.1, 2.7];
-const FADE = [1, 0.9, 0.6, 0.28, 0];
+// The card in front and its two neighbours stay solid: the front one used to
+// start fading the instant you scrolled, because the fade reads off the
+// distance to the centre and that distance leaves zero as soon as anything
+// moves. Flat to one card out, then it falls away as before, reaching nothing
+// at the same depth it always did.
+const FADE = [1, 1, 0.75, 0.35, 0];
 
 // "Card" — a deck seen face on (Figma 175:556, 990px column). The front card
 // is 700px and dead centre; each card behind is 50px narrower and sits a
