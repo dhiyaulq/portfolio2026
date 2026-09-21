@@ -41,18 +41,30 @@ const FADE = [1, 0.9, 0.6, 0.28, 0];
 // Scrolling deals the front card off the top-right corner: it slides up and
 // across, turning as it goes, while the deck promotes. `d` is depth — 0 is
 // the front of the deck, negative is a card that has been dealt away.
-const CARD_D = [-2, -1, 0, 1, 2, 3, 4, 5, 6];
-// Figma measures down and right from the centre of the column.
-const CARD_X = [616, 308, 0, 0, 0, 0, 0, 0, 0];
-const CARD_Y = [-659, -330, 0, 38, 72, 109, 145, 181, 217];
-const CARD_SCALE = [0.857, 0.929, 1, 0.929, 0.857, 0.786, 0.714, 0.643, 0.571];
-// Degrees, clockwise on screen, as the dealt card turns away.
-const CARD_ROT = [30, 15, 0, 0, 0, 0, 0, 0, 0];
-// A dealt card is clear of the top edge by d = -1.4; the fade only covers the
-// last of its travel so it doesn't dissolve in mid-air. The deep end fades
-// out too, for decks longer than the design's five.
-const CARD_FADE_D = [-1.8, -1.4, 0, 5, 6];
-const CARD_FADE = [0, 1, 1, 1, 0];
+// Depth into the deck. Four cards show: the one you are looking at and three
+// behind it, each a quarter dimmer than the one in front, so the deck fades
+// into the page rather than ending on a hard edge.
+const STACK_D = [0, 1, 2, 3, 4];
+// Figma measures downward from the centre of the column.
+const STACK_Y = [0, 38, 72, 109, 145];
+const STACK_SCALE = [1, 0.929, 0.857, 0.786, 0.714];
+const STACK_FADE = [1, 0.75, 0.5, 0.25, 0];
+// Mip bias for the buried cards. All you see of them is a sliver, and each
+// one is drawn smaller than its image — sampling a smaller mipmap costs the
+// GPU a fraction of the texel traffic and looks identical at that size.
+const STACK_BLUR = [0, 0.4, 0.9, 1.4, 1.8];
+
+// Dealing a card takes the first half of a scroll step and the deck closes up
+// over the second — the card is gone before anything moves up to replace it.
+const DEAL_SPLIT = 0.5;
+// The path of a card being dealt, as a fraction of its journey. Halfway is
+// the pose in the design (173:340); the end is off the top of the screen.
+const OUT_T = [0, 0.5, 1];
+const OUT_X = [0, 308, 616];
+const OUT_LIFT = [0, 0.47, 1];
+const OUT_SCALE = [1, 0.929, 0.857];
+// Degrees, clockwise on screen, as the card turns away.
+const OUT_ROT = [0, 15, 30];
 const DEG = Math.PI / 180;
 
 /**
@@ -262,18 +274,46 @@ function targetFor(
     // Same sticky entrance as the 3D stage: the deck rides down with the page
     // until the section reaches the top, then stays put.
     const stageShift = Math.min(local, 0);
-    const d = index - progress * Math.max(count - 1, 0);
     const fit = fit3D(vp);
-    const w = CARD_3D_W * lerpTable(CARD_D, CARD_SCALE, d) * fit;
+    const raw = progress * Math.max(count - 1, 0);
+    // Which card is being dealt, and how far through dealing it we are.
+    const leaving = Math.floor(raw);
+    const step = raw - leaving;
+
+    if (index <= leaving) {
+      // On its way off the top of the screen, or already gone.
+      const out = index < leaving ? 1 : Math.min(step / DEAL_SPLIT, 1);
+      const w = CARD_3D_W * lerpTable(OUT_T, OUT_SCALE, out) * fit;
+      // Far enough to clear the top edge on any screen: the travel the design
+      // uses at full size, or the height of the canvas, whichever is more.
+      const lift = Math.max(
+        700 * fit,
+        vp.colH / 2 + (CARD_3D_W * RATIO * fit) / 2 + 24
+      );
+      return {
+        x: lerpTable(OUT_T, OUT_X, out) * fit,
+        y: lerpTable(OUT_T, OUT_LIFT, out) * lift + stageShift,
+        w,
+        h: w * RATIO,
+        opacity: index < leaving ? 0 : 1,
+        blur: 0,
+        rot: -lerpTable(OUT_T, OUT_ROT, out) * DEG,
+      };
+    }
+
+    // Still on the deck. Nothing moves up until the dealt card has gone.
+    const closing = Math.max((step - DEAL_SPLIT) / (1 - DEAL_SPLIT), 0);
+    const depth = index - leaving - closing;
+    const w = CARD_3D_W * lerpTable(STACK_D, STACK_SCALE, depth) * fit;
     return {
-      x: lerpTable(CARD_D, CARD_X, d) * fit,
+      x: 0,
       // Figma offsets are measured downward; world +y is up.
-      y: -lerpTable(CARD_D, CARD_Y, d) * fit + stageShift,
+      y: -lerpTable(STACK_D, STACK_Y, depth) * fit + stageShift,
       w,
       h: w * RATIO,
-      opacity: lerpTable(CARD_FADE_D, CARD_FADE, d),
-      blur: 0,
-      rot: -lerpTable(CARD_D, CARD_ROT, d) * DEG,
+      opacity: lerpTable(STACK_D, STACK_FADE, depth),
+      blur: lerpTable(STACK_D, STACK_BLUR, depth),
+      rot: 0,
     };
   }
 
@@ -471,6 +511,13 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     // Dev-only counters: how many times each sound has been asked for.
     const sounds = { tick: 0, deal: 0, gather: 0 };
 
+    // Uploading a texture — pushing the pixels to the GPU and building its
+    // mipmaps — costs a few milliseconds of main thread each, and a layout
+    // change can bring several cards into view at the same instant. Left
+    // alone they all land on one frame and the page jolts right after the
+    // switch. They queue here instead and go up one per frame.
+    const uploads: (() => void)[] = [];
+
     const planes = works.map((work) => {
       const material = new THREE.ShaderMaterial({
         vertexShader: VERT,
@@ -525,23 +572,26 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
             .decode()
             .then(() => {
               if (disposed) return;
-              const texture = new THREE.Texture(img);
-              texture.colorSpace = THREE.SRGBColorSpace;
-              texture.generateMipmaps = true;
-              texture.minFilter = THREE.LinearMipmapLinearFilter;
-              texture.anisotropy = anisotropy;
-              texture.needsUpdate = true;
-              renderer.initTexture(texture);
-              material.uniforms.uMap.value = texture;
-              // The aspect of the image actually delivered, not of the
-              // original upload: the CDN crops to the requested box, and
-              // cover-fit has to work from what's really in the texture.
-              material.uniforms.uTexAspect.value =
-                img.naturalWidth && img.naturalHeight
-                  ? img.naturalWidth / img.naturalHeight
-                  : aspectOf(first);
-              material.uniforms.uHasMap.value = 1;
-              needsRender = true;
+              uploads.push(() => {
+                if (disposed) return;
+                const texture = new THREE.Texture(img);
+                texture.colorSpace = THREE.SRGBColorSpace;
+                texture.generateMipmaps = true;
+                texture.minFilter = THREE.LinearMipmapLinearFilter;
+                texture.anisotropy = anisotropy;
+                texture.needsUpdate = true;
+                renderer.initTexture(texture);
+                material.uniforms.uMap.value = texture;
+                // The aspect of the image actually delivered, not of the
+                // original upload: the CDN crops to the requested box, and
+                // cover-fit has to work from what's really in the texture.
+                material.uniforms.uTexAspect.value =
+                  img.naturalWidth && img.naturalHeight
+                    ? img.naturalWidth / img.naturalHeight
+                    : aspectOf(first);
+                material.uniforms.uHasMap.value = 1;
+                needsRender = true;
+              });
             })
             .catch(() => {
               // Failed to load; the card keeps its placeholder grey.
@@ -666,6 +716,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const dt = Math.min((now - prev) / 1000, 1 / 20);
       prev = now;
       lenis.raf(now);
+      // One waiting texture per frame, no more.
+      uploads.shift()?.();
       const scrollY = window.scrollY;
       // Scroll measured from the top of the showcase section (0 on desktop,
       // the hero's height on mobile). offsetTop is cheap when layout is clean.
@@ -809,6 +861,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         p.mesh.position.set(snap(c.x, dpr), snap(c.y, dpr), -Math.abs(i) * 0.001);
         p.mesh.scale.set(sw, sh, 1);
         p.mesh.rotation.z = c.rot;
+        // A card faded out — the back of the deck, or one already dealt — is
+        // a full-screen blend for nothing.
+        p.mesh.visible = c.opacity > 0.002;
         // Nearer-to-focus cards draw on top. The deck is different: a card
         // dealt off the top passes over the ones still on the pile, and it
         // shrinks as it goes — by width alone it would slide under the card
@@ -830,6 +885,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           tickCount,
           textures: renderer.info.memory.textures,
           sound: tickSoundState(),
+          pendingUploads: uploads.length,
           sounds: { ...sounds },
           planes: planes.map((p) => ({ ...p.current, src: p.src })),
         };
