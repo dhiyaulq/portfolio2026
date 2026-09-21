@@ -417,6 +417,8 @@ const FRAG = `
   uniform vec2 uSize;
   uniform float uRadius;
   uniform float uHasMap;
+  uniform float uEdge;
+  uniform float uEdgeAlpha;
   varying vec2 vUv;
 
   vec2 coverUv(vec2 uv) {
@@ -448,6 +450,17 @@ const FRAG = `
     float aa = max(fwidth(d), 1e-4);
     float mask = 1.0 - smoothstep(-aa, aa, d);
 
+    // A hairline just inside the edge, so a card whose image is nearly white
+    // still reads as a card against the page rather than bleeding into it.
+    // Black at a low alpha rather than a fixed grey: it draws a light grey
+    // line over a pale image and disappears into a dark one, which is where
+    // an outline isn't needed anyway. It follows the rounded corners because
+    // it comes from the same distance field as the mask. Applied after the
+    // encode below, not here — mixing toward black in linear light darkens
+    // far less than the same number does in sRGB, and this number should
+    // mean what it would mean in CSS.
+    float edge = smoothstep(-uEdge - aa, -uEdge + aa, d) * mask;
+
     // No discard for fully transparent pixels: blending already hides them,
     // and discard disables the early depth/tiling optimisations mobile GPUs
     // rely on, for every fragment of every card.
@@ -457,6 +470,8 @@ const FRAG = `
     // ShaderMaterial. Without it we'd write linear-light values into an sRGB
     // framebuffer and every image would render dark and over-contrasted.
     #include <colorspace_fragment>
+
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.0), uEdgeAlpha * edge);
   }
 `;
 
@@ -550,6 +565,11 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           uSize: { value: new THREE.Vector2(1, 1) },
           uRadius: { value: 8 },
           uHasMap: { value: 0 },
+          // A CSS pixel wide. A single device pixel disappears into the
+          // anti-aliased silhouette — the feather is about that wide itself,
+          // so the line never reaches its own colour.
+          uEdge: { value: 1 },
+          uEdgeAlpha: { value: 0.08 },
         },
       });
       const mesh = new THREE.Mesh(geometry, material);
