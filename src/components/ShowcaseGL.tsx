@@ -21,6 +21,14 @@ const SIDEBAR_W = 457;
 const LG_BREAKPOINT = 1024;
 const RATIO = 3 / 4; // height = width * RATIO
 
+// The hairline around a card, drawn just outside its edge, and the margin the
+// quad grows by to make room for it. The margin is a pixel wider than the line
+// so the line's outer side has somewhere to fade out; both are whole CSS
+// pixels, and the pair is even, so growing the quad doesn't knock the card off
+// the device-pixel grid.
+const EDGE_W = 1;
+const EDGE_PAD = EDGE_W + 1;
+
 const ONE_COL_W = 800;
 const TWO_COL_W = 900;
 const CARD_3D_W = 700;
@@ -419,6 +427,7 @@ const FRAG = `
   uniform float uHasMap;
   uniform float uEdge;
   uniform float uEdgeAlpha;
+  uniform float uPad;
   varying vec2 vUv;
 
   vec2 coverUv(vec2 uv) {
@@ -430,7 +439,11 @@ const FRAG = `
   }
 
   void main() {
-    vec2 uv = coverUv(vUv);
+    // The quad is bigger than the card by uPad on every side, to leave room
+    // for the line outside it. Everything below works in card space.
+    vec2 quad = uSize + 2.0 * uPad;
+    vec2 cardUv = (vUv * quad - uPad) / uSize;
+    vec2 uv = coverUv(cardUv);
     // Placeholder grey, written in linear light so the sRGB encode below
     // lands it back on #E8E8E8.
     vec4 c = vec4(0.808, 0.808, 0.808, 1.0);
@@ -441,7 +454,7 @@ const FRAG = `
     }
 
     // rounded-rect mask in screen pixels
-    vec2 p = (vUv - 0.5) * uSize;
+    vec2 p = (vUv - 0.5) * quad;
     vec2 q = abs(p) - (uSize * 0.5 - vec2(uRadius));
     float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uRadius;
     // Feather across exactly one device pixel, whatever the DPR. A fixed
@@ -450,16 +463,16 @@ const FRAG = `
     float aa = max(fwidth(d), 1e-4);
     float mask = 1.0 - smoothstep(-aa, aa, d);
 
-    // A hairline just inside the edge, so a card whose image is nearly white
-    // still reads as a card against the page rather than bleeding into it.
-    // Black at a low alpha rather than a fixed grey: it draws a light grey
-    // line over a pale image and disappears into a dark one, which is where
-    // an outline isn't needed anyway. It follows the rounded corners because
-    // it comes from the same distance field as the mask. Applied after the
-    // encode below, not here — mixing toward black in linear light darkens
-    // far less than the same number does in sRGB, and this number should
-    // mean what it would mean in CSS.
-    float edge = smoothstep(-uEdge - aa, -uEdge + aa, d) * mask;
+    // A hairline just OUTSIDE the card, in the margin the quad carries for
+    // it, so a card whose image is nearly white still reads as a card against
+    // the page rather than bleeding into it. Black at a low alpha, so it
+    // needs no colour of its own — a light grey over the page. It follows the
+    // rounded corners because it is cut from the same distance field as the
+    // card. Drawn as a layer UNDER the card rather than as a ring beside it:
+    // along the card's anti-aliased edge the two overlap, and compositing
+    // them properly is what keeps that seam from reading as a darker line of
+    // its own.
+    float under = 1.0 - smoothstep(uEdge - aa, uEdge + aa, d);
 
     // No discard for fully transparent pixels: blending already hides them,
     // and discard disables the early depth/tiling optimisations mobile GPUs
@@ -471,7 +484,14 @@ const FRAG = `
     // framebuffer and every image would render dark and over-contrasted.
     #include <colorspace_fragment>
 
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.0), uEdgeAlpha * edge);
+    // The line goes on after the encode: black is black either way, and the
+    // alpha then means what the same number would mean in CSS. Card over
+    // line, straight alpha — the line contributes no colour, being black, so
+    // only the alpha and the premultiply need doing.
+    float lineA = uEdgeAlpha * uOpacity * under;
+    float outA = gl_FragColor.a + lineA * (1.0 - gl_FragColor.a);
+    gl_FragColor.rgb *= gl_FragColor.a / max(outA, 1e-5);
+    gl_FragColor.a = outA;
   }
 `;
 
@@ -568,8 +588,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           // A CSS pixel wide. A single device pixel disappears into the
           // anti-aliased silhouette — the feather is about that wide itself,
           // so the line never reaches its own colour.
-          uEdge: { value: 1 },
-          uEdgeAlpha: { value: 0.05 },
+          uEdge: { value: EDGE_W },
+          uEdgeAlpha: { value: 0.1 },
+          uPad: { value: EDGE_PAD },
         },
       });
       const mesh = new THREE.Mesh(geometry, material);
@@ -900,7 +921,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         const sw = snapSize(c.w, dpr);
         const sh = snapSize(c.h, dpr);
         p.mesh.position.set(snap(c.x, dpr), snap(c.y, dpr), -Math.abs(i) * 0.001);
-        p.mesh.scale.set(sw, sh, 1);
+        // The quad carries the card plus the margin its outside line needs.
+        p.mesh.scale.set(sw + EDGE_PAD * 2, sh + EDGE_PAD * 2, 1);
         p.mesh.rotation.z = c.rot;
         // A card faded out — the back of the deck, or one already dealt — is
         // a full-screen blend for nothing.
