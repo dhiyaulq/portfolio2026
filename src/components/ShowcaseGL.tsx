@@ -589,7 +589,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           // anti-aliased silhouette — the feather is about that wide itself,
           // so the line never reaches its own colour.
           uEdge: { value: EDGE_W },
-          uEdgeAlpha: { value: 0.1 },
+          uEdgeAlpha: { value: 0.07 },
           uPad: { value: EDGE_PAD },
         },
       });
