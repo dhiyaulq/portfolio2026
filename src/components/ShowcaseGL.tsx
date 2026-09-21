@@ -41,22 +41,23 @@ const FADE = [1, 0.9, 0.6, 0.28, 0];
 // Scrolling deals the front card off the top-right corner: it slides up and
 // across, turning as it goes, while the deck promotes. `d` is depth — 0 is
 // the front of the deck, negative is a card that has been dealt away.
-// Depth into the deck. Four cards show: the one you are looking at and three
-// behind it, each a quarter dimmer than the one in front, so the deck fades
-// into the page rather than ending on a hard edge.
-const STACK_D = [0, 1, 2, 3, 4];
+// Depth into the deck. The first two cards are solid; from the third back
+// each layer is a fifth dimmer than the one in front, so the deck fades into
+// the page instead of ending on a hard edge.
+const STACK_D = [0, 1, 2, 3, 4, 5, 6];
 // Figma measures downward from the centre of the column.
-const STACK_Y = [0, 38, 72, 109, 145];
-const STACK_SCALE = [1, 0.929, 0.857, 0.786, 0.714];
-const STACK_FADE = [1, 0.75, 0.5, 0.25, 0];
+const STACK_Y = [0, 38, 72, 109, 145, 181, 217];
+const STACK_SCALE = [1, 0.929, 0.857, 0.786, 0.714, 0.643, 0.571];
+const STACK_FADE = [1, 1, 0.8, 0.6, 0.4, 0.2, 0];
 // Mip bias for the buried cards. All you see of them is a sliver, and each
 // one is drawn smaller than its image — sampling a smaller mipmap costs the
 // GPU a fraction of the texel traffic and looks identical at that size.
-const STACK_BLUR = [0, 0.4, 0.9, 1.4, 1.8];
+const STACK_BLUR = [0, 0.4, 0.9, 1.4, 1.8, 2.1, 2.4];
 
-// Dealing a card takes the first half of a scroll step and the deck closes up
-// over the second — the card is gone before anything moves up to replace it.
-const DEAL_SPLIT = 0.5;
+// Dealing a card takes this much of a scroll step; the deck closes up over
+// what's left. The card is off the screen by the end of it — it clears at
+// about 94% of its travel — so nothing moves up until it has gone.
+const DEAL_SPLIT = 0.45;
 // The path of a card being dealt, as a fraction of its journey. Halfway is
 // the pose in the design (173:340); the end is off the top of the screen.
 const OUT_T = [0, 0.5, 1];
@@ -193,6 +194,16 @@ function isStack(mode: Mode) {
   return mode === "3d-1" || mode === "3d-2" || mode === "card";
 }
 
+/**
+ * Scroll distance that advances one card. The 3D carousels click through at
+ * 0.6 of a screen each; the deck takes twice that, because a card being dealt
+ * is a thing to watch rather than a position to pass through — at the
+ * carousel's pace a single flick threw half the deck off the screen.
+ */
+function stackScroll(mode: Mode, vp: Viewport) {
+  return vp.colH * (mode === "card" ? 1.25 : 0.6);
+}
+
 /** Card width/height for the flow layouts. */
 function flowCardSize(mode: Mode, vp: Viewport) {
   const { side, gap } = layoutOf(vp);
@@ -208,10 +219,10 @@ function flowCardSize(mode: Mode, vp: Viewport) {
 /** Scrollable height of the showcase for a mode; real page scroll drives it. */
 function contentHeight(mode: Mode, count: number, vp: Viewport) {
   if (isStack(mode)) {
-    // Scroll distance per card is tied to the stable canvas height so the 3D
+    // Scroll distance per card is tied to the stable canvas height so the
     // progress doesn't shift if the toolbars change; the extra screen is the
     // visible one, so the last card lands exactly at the end.
-    return Math.max(count - 1, 1) * vp.colH * 0.6 + vp.visH;
+    return Math.max(count - 1, 1) * stackScroll(mode, vp) + vp.visH;
   }
   const { top, gap, bottom } = layoutOf(vp);
   const { h } = flowCardSize(mode, vp);
@@ -301,8 +312,11 @@ function targetFor(
       };
     }
 
-    // Still on the deck. Nothing moves up until the dealt card has gone.
-    const closing = Math.max((step - DEAL_SPLIT) / (1 - DEAL_SPLIT), 0);
+    // Still on the deck. Nothing moves up until the dealt card has gone —
+    // and then it moves at once. Eased out, so the deck answers the moment
+    // the card clears rather than drifting up behind it.
+    const closingRaw = Math.max((step - DEAL_SPLIT) / (1 - DEAL_SPLIT), 0);
+    const closing = 1 - (1 - closingRaw) * (1 - closingRaw);
     const depth = index - leaving - closing;
     const w = CARD_3D_W * lerpTable(STACK_D, STACK_SCALE, depth) * fit;
     return {
@@ -770,20 +784,29 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // layouts it felt disconnected from the motion. A mode switch jumps the
       // index outright, so it re-baselines instead of counting.
       const focus = focusIndex(m, count, local, viewport);
-      if (
-        lastFocus !== null &&
-        m === lastFocusMode &&
-        crossings(lastFocus, focus) > 0
-      ) {
-        // The 3D carousels click like a dial; the deck deals and gathers,
-        // which is a different sound in each direction.
+      if (lastFocus !== null && m === lastFocusMode) {
+        // The 3D carousels click like a dial as each card passes the centre.
         if (m === "3d-1" || m === "3d-2") {
-          playTick();
-          sounds.tick++;
+          if (crossings(lastFocus, focus) > 0) {
+            playTick();
+            sounds.tick++;
+          }
         } else if (m === "card") {
-          const kind = focus > lastFocus ? "deal" : "gather";
-          playCard(kind);
-          sounds[kind]++;
+          // The deck sounds when something actually happens to a card, and
+          // that is at a different point of the scroll in each direction.
+          // Dealing: the card comes off the deck partway through the step —
+          // that is the sound, in step with the deck closing behind it, not
+          // the start of the scroll that sets it moving. Gathering: the card
+          // lands back on the pile at the end of its return.
+          if (focus > lastFocus) {
+            if (crossings(lastFocus - DEAL_SPLIT, focus - DEAL_SPLIT) > 0) {
+              playCard("deal");
+              sounds.deal++;
+            }
+          } else if (crossings(lastFocus, focus) > 0) {
+            playCard("gather");
+            sounds.gather++;
+          }
         }
       }
       lastFocus = focus;
