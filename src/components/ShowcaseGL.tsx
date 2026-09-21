@@ -569,7 +569,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           // anti-aliased silhouette — the feather is about that wide itself,
           // so the line never reaches its own colour.
           uEdge: { value: 1 },
-          uEdgeAlpha: { value: 0.08 },
+          uEdgeAlpha: { value: 0.05 },
         },
       });
       const mesh = new THREE.Mesh(geometry, material);
