@@ -13,7 +13,7 @@ import {
   PILL_STYLE,
 } from "@/components/glassDock";
 
-export type Mode = "1-col" | "2-col" | "3d-1" | "3d-2";
+export type Mode = "1-col" | "2-col" | "3d-1" | "3d-2" | "card";
 type IconProps = { className?: string };
 
 // Layout-switcher icons, exact paths exported from the Figma toggle control
@@ -82,11 +82,27 @@ function ThreeDTwoIcon({ className }: IconProps) {
   );
 }
 
+function CardIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className}>
+      <path
+        fill="currentColor"
+        d="M12.1549 11.7175C12.936 11.9267 13.5713 11.331 13.7389 10.7057L14.0163 9.6706V13.8223C14.0162 14.2203 13.7471 14.543 13.4153 14.543H2.60091C2.26914 14.543 2.00007 14.2203 2 13.8223V8.99607L12.1549 11.7175Z"
+      />
+      <path
+        fill="currentColor"
+        d="M1.88164 8.27487C1.56113 8.189 1.38485 7.80753 1.4879 7.42293L2.98071 1.85168C3.08377 1.46707 3.42715 1.22489 3.74766 1.31077L14.1938 4.10981C14.5143 4.19569 14.6906 4.5771 14.5875 4.96171L13.0947 10.533C12.9917 10.9176 12.6483 11.1598 12.3277 11.0739L1.88164 8.27487Z"
+      />
+    </svg>
+  );
+}
+
 export const MODES: { id: Mode; label: string; icon: ComponentType<IconProps> }[] = [
   { id: "1-col", label: "1-Col", icon: OneColIcon },
   { id: "2-col", label: "2-Col", icon: TwoColIcon },
   { id: "3d-1", label: "3D - 1", icon: ThreeDOneIcon },
   { id: "3d-2", label: "3D - 2", icon: ThreeDTwoIcon },
+  { id: "card", label: "Card", icon: CardIcon },
 ];
 
 // Pop-in for the dock: it inflates from its bottom edge like a balloon — a
@@ -138,7 +154,7 @@ export default function LayoutSwitcher({
   onChange: (m: Mode) => void;
   /** Whether the showcase is on screen; the dock pops in and out with it. */
   visible?: boolean;
-  /** Which modes to offer (mobile drops 3D-2). Defaults to all four. */
+  /** Which modes to offer (mobile drops 3D-2). Defaults to all five. */
   modes?: Mode[];
 }) {
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -193,7 +209,7 @@ export default function LayoutSwitcher({
               onClick={() => onChange(id)}
               // pl 8 / pr 12 is asymmetric in the design — the icon sits
               // tighter to the left edge than the label does to the right.
-              className={`${DOCK_BUTTON_CLASS} gap-1.5 py-2 pl-2 pr-3 text-sm font-medium leading-4 ${
+              className={`${DOCK_BUTTON_CLASS} gap-1 py-2 pl-2 pr-3 text-sm font-medium leading-4 ${
                 active ? "text-accent" : "text-[#4c4b4b] hover:text-accent"
               }`}
               style={NO_TAP_HIGHLIGHT}

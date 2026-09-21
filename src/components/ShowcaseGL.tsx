@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import Lenis from "lenis";
 import { urlFor } from "@/lib/sanity";
-import { playTick, primeTickSound, tickSoundState } from "@/lib/tickSound";
+import { playCard, playTick, primeTickSound, tickSoundState } from "@/lib/tickSound";
 import type { MediaItem, WorkListItem } from "@/lib/queries";
 import LayoutSwitcher, { type Mode } from "@/components/LayoutSwitcher";
 
@@ -34,6 +34,26 @@ const SCALE = [1, 0.714, 0.429, 0.286, 0.2];
 // smoother and far cheaper than a multi-tap blur: one texture fetch, not five.
 const BLUR = [0, 0.7, 1.5, 2.1, 2.7];
 const FADE = [1, 0.9, 0.6, 0.28, 0];
+
+// "Card" — a deck seen face on (Figma 175:556, 990px column). The front card
+// is 700px and dead centre; each card behind is 50px narrower and sits a
+// little lower, so all you see of it is a sliver below the one in front.
+// Scrolling deals the front card off the top-right corner: it slides up and
+// across, turning as it goes, while the deck promotes. `d` is depth — 0 is
+// the front of the deck, negative is a card that has been dealt away.
+const CARD_D = [-2, -1, 0, 1, 2, 3, 4, 5, 6];
+// Figma measures down and right from the centre of the column.
+const CARD_X = [616, 308, 0, 0, 0, 0, 0, 0, 0];
+const CARD_Y = [-659, -330, 0, 38, 72, 109, 145, 181, 217];
+const CARD_SCALE = [0.857, 0.929, 1, 0.929, 0.857, 0.786, 0.714, 0.643, 0.571];
+// Degrees, clockwise on screen, as the dealt card turns away.
+const CARD_ROT = [30, 15, 0, 0, 0, 0, 0, 0, 0];
+// A dealt card is clear of the top edge by d = -1.4; the fade only covers the
+// last of its travel so it doesn't dissolve in mid-air. The deep end fades
+// out too, for decks longer than the design's five.
+const CARD_FADE_D = [-1.8, -1.4, 0, 5, 6];
+const CARD_FADE = [0, 1, 1, 1, 0];
+const DEG = Math.PI / 180;
 
 /**
  * colW / colH — the canvas. On touch devices colH is the tallest height seen
@@ -148,7 +168,18 @@ type Target = {
   h: number;
   opacity: number;
   blur: number;
+  /** Radians, world convention (+y up), so clockwise on screen is negative. */
+  rot: number;
 };
+
+/**
+ * Layouts driven one card at a time rather than by a column of them: the two
+ * 3D carousels and the card deck. They share their scroll mapping — one card
+ * per 0.6 screens — and so their scroll height, focus and anchoring.
+ */
+function isStack(mode: Mode) {
+  return mode === "3d-1" || mode === "3d-2" || mode === "card";
+}
 
 /** Card width/height for the flow layouts. */
 function flowCardSize(mode: Mode, vp: Viewport) {
@@ -164,7 +195,7 @@ function flowCardSize(mode: Mode, vp: Viewport) {
 
 /** Scrollable height of the showcase for a mode; real page scroll drives it. */
 function contentHeight(mode: Mode, count: number, vp: Viewport) {
-  if (mode === "3d-1" || mode === "3d-2") {
+  if (isStack(mode)) {
     // Scroll distance per card is tied to the stable canvas height so the 3D
     // progress doesn't shift if the toolbars change; the extra screen is the
     // visible one, so the last card lands exactly at the end.
@@ -188,7 +219,7 @@ function contentHeight(mode: Mode, count: number, vp: Viewport) {
  */
 function focusIndex(mode: Mode, count: number, local: number, vp: Viewport) {
   const last = Math.max(count - 1, 0);
-  if (mode === "3d-1" || mode === "3d-2") {
+  if (isStack(mode)) {
     const range = Math.max(contentHeight(mode, count, vp) - vp.visH, 1);
     return Math.min(Math.max(local / range, 0), 1) * last;
   }
@@ -225,6 +256,27 @@ function targetFor(
   vp: Viewport
 ): Target {
   const L = layoutOf(vp);
+  if (mode === "card") {
+    const range = Math.max(contentHeight(mode, count, vp) - vp.visH, 1);
+    const progress = Math.min(Math.max(local / range, 0), 1);
+    // Same sticky entrance as the 3D stage: the deck rides down with the page
+    // until the section reaches the top, then stays put.
+    const stageShift = Math.min(local, 0);
+    const d = index - progress * Math.max(count - 1, 0);
+    const fit = fit3D(vp);
+    const w = CARD_3D_W * lerpTable(CARD_D, CARD_SCALE, d) * fit;
+    return {
+      x: lerpTable(CARD_D, CARD_X, d) * fit,
+      // Figma offsets are measured downward; world +y is up.
+      y: -lerpTable(CARD_D, CARD_Y, d) * fit + stageShift,
+      w,
+      h: w * RATIO,
+      opacity: lerpTable(CARD_FADE_D, CARD_FADE, d),
+      blur: 0,
+      rot: -lerpTable(CARD_D, CARD_ROT, d) * DEG,
+    };
+  }
+
   if (mode === "3d-1" || mode === "3d-2") {
     const range = Math.max(contentHeight(mode, count, vp) - vp.visH, 1);
     const progress = Math.min(Math.max(local / range, 0), 1);
@@ -245,6 +297,7 @@ function targetFor(
       h: w * RATIO,
       opacity: lerpTable(DIST, FADE, ad),
       blur: lerpTable(DIST, BLUR, ad),
+      rot: 0,
     };
   }
 
@@ -260,6 +313,7 @@ function targetFor(
     h,
     opacity: 1,
     blur: 0,
+    rot: 0,
   };
 }
 
@@ -414,6 +468,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     let needsRender = true;
     let renderCount = 0;
     let tickCount = 0;
+    // Dev-only counters: how many times each sound has been asked for.
+    const sounds = { tick: 0, deal: 0, gather: 0 };
 
     const planes = works.map((work) => {
       const material = new THREE.ShaderMaterial({
@@ -663,12 +719,20 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // index outright, so it re-baselines instead of counting.
       const focus = focusIndex(m, count, local, viewport);
       if (
-        (m === "3d-1" || m === "3d-2") &&
         lastFocus !== null &&
         m === lastFocusMode &&
         crossings(lastFocus, focus) > 0
       ) {
-        playTick();
+        // The 3D carousels click like a dial; the deck deals and gathers,
+        // which is a different sound in each direction.
+        if (m === "3d-1" || m === "3d-2") {
+          playTick();
+          sounds.tick++;
+        } else if (m === "card") {
+          const kind = focus > lastFocus ? "deal" : "gather";
+          playCard(kind);
+          sounds[kind]++;
+        }
       }
       lastFocus = focus;
       lastFocusMode = m;
@@ -722,7 +786,10 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           Math.abs(t.x - c.x),
           Math.abs(t.y - c.y),
           Math.abs(t.w - c.w),
-          Math.abs(t.opacity - c.opacity) * 100
+          Math.abs(t.opacity - c.opacity) * 100,
+          // Radians are small numbers; a degree of turn is worth about as
+          // much to the eye as a few pixels of travel.
+          Math.abs(t.rot - c.rot) * 200
         );
         c.x += (t.x - c.x) * k;
         c.y += (t.y - c.y) * k;
@@ -730,6 +797,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         c.h += (t.h - c.h) * k;
         c.opacity += (t.opacity - c.opacity) * k;
         c.blur += (t.blur - c.blur) * k;
+        c.rot += (t.rot - c.rot) * k;
         p.current = c;
 
         // Land the quad on whole device pixels. Without this a card rests at
@@ -740,8 +808,12 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         const sh = snapSize(c.h, dpr);
         p.mesh.position.set(snap(c.x, dpr), snap(c.y, dpr), -Math.abs(i) * 0.001);
         p.mesh.scale.set(sw, sh, 1);
-        // Nearer-to-focus cards draw on top.
-        p.mesh.renderOrder = Math.round(c.w);
+        p.mesh.rotation.z = c.rot;
+        // Nearer-to-focus cards draw on top. The deck is different: a card
+        // dealt off the top passes over the ones still on the pile, and it
+        // shrinks as it goes — by width alone it would slide under the card
+        // that just took its place. Deal order is the draw order there.
+        p.mesh.renderOrder = m === "card" ? count - i : Math.round(c.w);
         p.material.uniforms.uOpacity.value = c.opacity;
         p.material.uniforms.uBlur.value = c.blur;
         p.material.uniforms.uSize.value.set(sw, sh);
@@ -758,6 +830,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           tickCount,
           textures: renderer.info.memory.textures,
           sound: tickSoundState(),
+          sounds: { ...sounds },
           planes: planes.map((p) => ({ ...p.current, src: p.src })),
         };
       }
@@ -821,7 +894,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   const readAnchor = (m: Mode) => {
     const vp = currentViewport();
     const local = Math.max(window.scrollY - sectionTop(), 0);
-    if (m === "3d-1" || m === "3d-2") {
+    if (isStack(m)) {
       const range = Math.max(contentHeight(m, count, vp) - vp.visH, 1);
       return Math.round(Math.min(local / range, 1) * lastIndex);
     }
@@ -835,7 +908,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   const scrollForAnchor = (m: Mode, anchor: number) => {
     const vp = currentViewport();
     const max = Math.max(contentHeight(m, count, vp) - vp.visH, 0);
-    if (m === "3d-1" || m === "3d-2") {
+    if (isStack(m)) {
       const progress = lastIndex > 0 ? anchor / lastIndex : 0;
       return Math.min(progress * max, max);
     }
@@ -922,7 +995,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           mode={mode}
           onChange={handleModeChange}
           visible={switcherVisible}
-          modes={wideLayout ? undefined : ["1-col", "2-col", "3d-1"]}
+          modes={wideLayout ? undefined : ["1-col", "2-col", "3d-1", "card"]}
         />
       )}
     </div>
