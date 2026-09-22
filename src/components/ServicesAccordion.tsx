@@ -137,40 +137,49 @@ export default function ServicesAccordion() {
               <PlusMinusIcon open={isOpen} />
             </button>
 
+            {/* The open list carries its own rule underneath (Figma 185:913),
+                so an open section reads as closed off rather than running
+                into the heading below it.
+
+                That rule is drawn on this box rather than around the list
+                inside it, which is what makes the movement read properly:
+                the line is the bottom edge of the thing that is growing, so
+                it travels down with it — and everything below travels with
+                it too — instead of fading in once there is room for it. It
+                is switched on the instant the panel starts opening and off
+                only once it has finished closing, which is invisible either
+                way: at that moment it sits directly under the heading's own
+                rule. Nothing here fades; it only moves. */}
             <motion.div
               id={`services-${id}`}
               initial={false}
-              animate={{ height: isOpen ? "auto" : 0 }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="overflow-hidden"
+              animate={{
+                height: isOpen ? "auto" : 0,
+                borderBottomWidth: isOpen ? 1 : 0,
+              }}
+              transition={{
+                height: { duration: 0.34, ease: [0.22, 1, 0.36, 1] },
+                borderBottomWidth: { duration: 0, delay: isOpen ? 0 : 0.34 },
+              }}
+              className="overflow-hidden border-b-0 border-[rgba(0,0,0,0.1)]"
               // Closed means closed for keyboards and screen readers too.
               inert={!isOpen}
               aria-hidden={!isOpen}
             >
-              <motion.div
-                className="pt-3"
-                initial={false}
-                animate={{ opacity: isOpen ? 1 : 0 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-              >
-                {/* The open list carries its own rule underneath (Figma
-                    185:913), so an open section reads as closed off rather
-                    than running into the heading below it. */}
-                <div className="flex flex-col gap-2 border-b border-[rgba(0,0,0,0.1)] pb-3">
-                  {Array.from({ length: rows }).map((_, row) => (
-                    <div key={row} className="flex gap-3">
-                      {items.slice(row * 2, row * 2 + 2).map((item) => (
-                        <SkillBadge
-                          key={item.label}
-                          icon={item.icon}
-                          label={item.label}
-                          tone={tone}
-                        />
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
+              <div className="flex flex-col gap-2 py-3">
+                {Array.from({ length: rows }).map((_, row) => (
+                  <div key={row} className="flex gap-3">
+                    {items.slice(row * 2, row * 2 + 2).map((item) => (
+                      <SkillBadge
+                        key={item.label}
+                        icon={item.icon}
+                        label={item.label}
+                        tone={tone}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
             </motion.div>
           </div>
         );
