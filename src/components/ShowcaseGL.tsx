@@ -17,7 +17,7 @@ import LayoutSwitcher, { type Mode } from "@/components/LayoutSwitcher";
 // Every card is 4:3. All numbers below are CSS pixels; the orthographic camera
 // is set up 1 unit = 1 px so the scene matches the spec exactly.
 // ---------------------------------------------------------------------------
-const SIDEBAR_W = 457;
+const SIDEBAR_W = 410;
 const LG_BREAKPOINT = 1024;
 const RATIO = 3 / 4; // height = width * RATIO
 
@@ -1102,7 +1102,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       <div
         ref={mountRef}
         aria-hidden
-        className="pointer-events-none fixed inset-y-0 right-0 left-0 z-0 lg:left-[457px]"
+        className="pointer-events-none fixed inset-y-0 right-0 left-0 z-0 lg:left-[410px]"
       />
       <div ref={spacerRef} style={{ height: docHeight }} aria-hidden />
 

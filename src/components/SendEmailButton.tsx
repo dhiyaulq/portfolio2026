@@ -38,7 +38,7 @@ export default function SendEmailButton({ email }: { email: string }) {
       }}
       transition={{ duration: 0.15, ease: "easeOut" }}
       style={{ backgroundImage: FILL_IDLE }}
-      className="relative flex items-center gap-1.5 overflow-hidden rounded-full py-2 pl-3 pr-2"
+      className="relative flex items-center gap-1.5 overflow-hidden rounded-full py-1.5 pl-3 pr-2"
     >
       <motion.span
         aria-hidden
@@ -52,14 +52,14 @@ export default function SendEmailButton({ email }: { email: string }) {
       />
       {/* The 1px stroke, drawn inside the edge like Figma's inside-aligned
           stroke. A CSS border would add 2px to the box on top of the 8/12
-          padding; this keeps the button at 32px. It sits after the overlay so
+          padding; this keeps the button at 34px. It sits after the overlay so
           the pressed #1080d6 fill doesn't paint over it. */}
       <span
         aria-hidden
         className="pointer-events-none absolute inset-0 rounded-full"
         style={{ boxShadow: "inset 0 0 0 1px #1389e3" }}
       />
-      <span className="relative text-sm font-semibold leading-4 text-white">Send Email</span>
+      <span className="relative text-sm font-semibold leading-[22px] text-white">Send Email</span>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/icons/cta-arrow-right.svg" alt="" className="relative h-3 w-3" />
     </motion.a>

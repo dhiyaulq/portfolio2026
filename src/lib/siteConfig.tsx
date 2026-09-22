@@ -47,7 +47,7 @@ export const siteConfig = {
   bio: "I’m Dhiya, a designer based in Indonesia, partnering with forward-thinking teams to create thoughtful interfaces, websites, and brand identities designed for lasting growth.",
   email: "dhiyaulhaqmahmud@gmail.com",
   chatUrl: "https://t.me/dsignspace",
-  copyright: "© 2026, Dhiya Ulhaq Mahmud.",
+  copyright: "© 2026, Dhiya",
 
   // "Worked with" logos, exported from Figma 135:445. Each carries its own
   // designed box — they are deliberately different sizes and are NOT

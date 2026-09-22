@@ -176,7 +176,7 @@ export default function LayoutSwitcher({
 
   return (
     // 32px from the bottom on mobile (Figma 155:510), 48px on desktop.
-    <div className="fixed inset-x-0 bottom-8 z-30 flex justify-center lg:bottom-12 lg:pl-[457px]">
+    <div className="fixed inset-x-0 bottom-8 z-30 flex justify-center lg:bottom-12 lg:pl-[410px]">
       <motion.div
         className={`${DOCK_CLASS} ${visible ? "" : "pointer-events-none"}`}
         // Pre-promote the layer so the pop-in doesn't have to re-rasterise

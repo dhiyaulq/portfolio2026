@@ -9,7 +9,7 @@ export default async function HomePage() {
   const works = await client.fetch<WorkListItem[]>(ALL_WORK_QUERY);
 
   return (
-    <main className="flex min-h-screen w-full flex-col lg:flex-row lg:pl-[457px]">
+    <main className="flex min-h-screen w-full flex-col lg:flex-row lg:pl-[410px]">
       <Sidebar />
       <ShowcaseGL works={works} />
     </main>
