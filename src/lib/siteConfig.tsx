@@ -48,6 +48,12 @@ export const siteConfig = {
   email: "dhiyaulhaqmahmud@gmail.com",
   chatUrl: "https://t.me/dsignspace",
   copyright: "© 2026",
+  // Bottom right of the sidebar (Figma 192:2321).
+  socials: [
+    { id: "linkedin", label: "LinkedIn", href: "https://www.linkedin.com/in/dhiyaulq/" },
+    { id: "instagram", label: "Instagram", href: "https://www.instagram.com/madebydhiy/" },
+    { id: "x", label: "X", href: "https://x.com/madebydhiy" },
+  ] as const,
 
   // "Worked with" logos, exported from Figma 135:445. Each carries its own
   // designed box — they are deliberately different sizes and are NOT
