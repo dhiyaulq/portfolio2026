@@ -35,11 +35,19 @@ export default function ChatNowButton({ href }: { href: string }) {
       <span className="text-sm font-medium leading-[22px] text-[#1e1e1e]">Chat Now</span>
       {/* 1px stroke drawn inside the edge (like Figma's inside-aligned
           stroke) so it doesn't add to the 8/12 padding — the button stays
-          34px tall. */}
+          34px tall.
+
+          The design's own value for this stroke is 2% grey, which composites
+          to #FDFDFD on the white fill — invisible, and it was. What actually
+          draws the edge in Figma's render is its drop-shadow hugging the
+          silhouette all the way round, which a CSS box-shadow can't do from
+          those offsets: measured off the render, the edge falls to #DBDBDB at
+          its darkest and averages about #E0E0E0 across the pixel and a bit it
+          covers. 30% grey lands a crisp 1px line on that average. */}
       <span
         aria-hidden
         className="pointer-events-none absolute inset-0 rounded-full"
-        style={{ boxShadow: "inset 0 0 0 1px rgba(153,153,153,0.02)" }}
+        style={{ boxShadow: "inset 0 0 0 1px rgba(153,153,153,0.3)" }}
       />
     </motion.a>
   );

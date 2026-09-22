@@ -107,15 +107,17 @@ const SECTIONS = [
 ] as const;
 
 /**
- * What Dhiya does, in two lists that open one at a time (Figma 186:1445).
+ * What Dhiya does, in two lists that open one at a time (Figma 186:1198).
  *
  * One at a time by request: opening the second closes the first, so the
  * sidebar keeps its height and the footer doesn't slide around underneath.
- * Clicking the open one closes it, which is the only way to see both headings
- * with nothing beneath them — the state the collapsed frame shows.
+ * Clicking the open one closes it again, back to the resting state both start
+ * in.
  */
 export default function ServicesAccordion() {
-  const [open, setOpen] = useState<string | null>("design");
+  // Nothing open to begin with: the sidebar rests as two headings and a rule
+  // apiece, and the lists are there for whoever wants them.
+  const [open, setOpen] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col">
@@ -146,23 +148,28 @@ export default function ServicesAccordion() {
               aria-hidden={!isOpen}
             >
               <motion.div
-                className="flex flex-col gap-2 py-3"
+                className="pt-3"
                 initial={false}
                 animate={{ opacity: isOpen ? 1 : 0 }}
                 transition={{ duration: 0.2, ease: "easeOut" }}
               >
-                {Array.from({ length: rows }).map((_, row) => (
-                  <div key={row} className="flex gap-3">
-                    {items.slice(row * 2, row * 2 + 2).map((item) => (
-                      <SkillBadge
-                        key={item.label}
-                        icon={item.icon}
-                        label={item.label}
-                        tone={tone}
-                      />
-                    ))}
-                  </div>
-                ))}
+                {/* The open list carries its own rule underneath (Figma
+                    185:913), so an open section reads as closed off rather
+                    than running into the heading below it. */}
+                <div className="flex flex-col gap-2 border-b border-[rgba(0,0,0,0.1)] pb-3">
+                  {Array.from({ length: rows }).map((_, row) => (
+                    <div key={row} className="flex gap-3">
+                      {items.slice(row * 2, row * 2 + 2).map((item) => (
+                        <SkillBadge
+                          key={item.label}
+                          icon={item.icon}
+                          label={item.label}
+                          tone={tone}
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </motion.div>
             </motion.div>
           </div>
