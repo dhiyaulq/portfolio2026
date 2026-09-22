@@ -33,15 +33,21 @@ export default function ChatNowButton({ href }: { href: string }) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/icons/telegram.png" alt="" className="h-5 w-5" />
       <span className="text-sm font-medium leading-[22px] text-[#1e1e1e]">Chat Now</span>
-      {/* The stroke as the design has it (103:1046): 2% grey, drawn inside
-          the edge like Figma's inside-aligned stroke so it doesn't add to the
-          8/12 padding and the button stays 34px tall. It composites to
-          #FDFDFD on the white fill, so what gives this button its edge is the
-          shadow above, not this. */}
+      {/* 1px stroke drawn inside the edge (like Figma's inside-aligned
+          stroke) so it doesn't add to the 8/12 padding — the button stays
+          34px tall.
+
+          The design's own value for this stroke is 2% grey, which composites
+          to #FDFDFD on the white fill — invisible, and it was. What actually
+          draws the edge in Figma's render is its drop-shadow hugging the
+          silhouette all the way round, which a CSS box-shadow can't do from
+          those offsets: measured off the render, the edge falls to #DBDBDB at
+          its darkest. 8% black draws a #EBEBEB line — lighter than the
+          render, which is where this settled by eye. */}
       <span
         aria-hidden
         className="pointer-events-none absolute inset-0 rounded-full"
-        style={{ boxShadow: "inset 0 0 0 1px rgba(153,153,153,0.02)" }}
+        style={{ boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.08)" }}
       />
     </motion.a>
   );
