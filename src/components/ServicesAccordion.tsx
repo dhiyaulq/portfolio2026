@@ -29,7 +29,7 @@ function PlusMinusIcon({ open }: { open: boolean }) {
       viewBox="0 0 16 16"
       fill="none"
       aria-hidden
-      className="h-4 w-4 shrink-0 text-[#7d7d7d]"
+      className="h-4 w-4 shrink-0 text-[#737373]"
     >
       <path
         fill="currentColor"
@@ -164,9 +164,10 @@ export default function ServicesAccordion() {
               inert={!isOpen}
               aria-hidden={!isOpen}
             >
-              {/* 12px from the heading to the first row, and nothing below —
-                  the box's own padding closes the section off. */}
-              <div className="flex flex-col gap-2 pt-3">
+              {/* 12px from the heading to the first row. The 4px below sits
+                  on top of the box's own 12, which is what makes the 16 the
+                  open state has under its last row (191:2061). */}
+              <div className="flex flex-col gap-2 pb-1 pt-3">
                 {Array.from({ length: rows }).map((_, row) => (
                   <div key={row} className="flex gap-3">
                     {items.slice(row * 2, row * 2 + 2).map((item) => (

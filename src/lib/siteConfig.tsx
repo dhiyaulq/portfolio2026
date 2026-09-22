@@ -64,6 +64,7 @@ export const siteConfig = {
     { name: "Gentle Goodness", src: "/logos/gentle.png", width: 74, height: 24 },
     { name: "vitaminspa", src: "/logos/vitaminspa.svg", width: 115, height: 20 },
     { name: "Sustainable Impact Value Pioneer", src: "/logos/sustainable.svg", width: 82, height: 24 },
+    { name: "betty", src: "/logos/betty.png", width: 64, height: 24 },
     { name: "Claro Essentia", src: "/logos/claro-essentia.png", width: 90, height: 24 },
     { name: "Claro", src: "/logos/claro.svg", width: 114, height: 14 },
     { name: "Ekhaya", src: "/logos/circle-mark.png", width: 24, height: 24 },
