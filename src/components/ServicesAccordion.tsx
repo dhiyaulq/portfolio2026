@@ -111,7 +111,15 @@ const SECTIONS = [
 ] as const;
 
 /**
- * What Dhiya does, in two lists that open one at a time (Figma 186:1198).
+ * What Dhiya does, in two lists that open one at a time (Figma 191:1625).
+ *
+ * The frame is built as one bordered box per section: the heading sits in it,
+ * and when the section opens the list goes in with it. So the rule is always
+ * the same box's bottom edge — it is never handed between elements and never
+ * drawn twice. It simply travels, because the box it belongs to is the thing
+ * that grows. And the padding belongs to the box, not to the heading, which
+ * is what puts 12px between the heading and the first row rather than the 24
+ * two stacked paddings were giving.
  *
  * One at a time by request: opening the second closes the first, so the
  * sidebar keeps its height and the footer doesn't slide around underneath.
@@ -129,54 +137,36 @@ export default function ServicesAccordion() {
         const isOpen = open === id;
         const rows = Math.ceil(items.length / 2);
         return (
-          <div key={id}>
-            {/* The heading's rule belongs to it only while the section is
-                shut. Open, there is no line between the heading and its list
-                (Figma 186:1198) — the line below is the panel's own, and the
-                handover is what makes the movement read as one line coming
-                away from the heading and travelling down. It costs nothing in
-                height: the heading gives up a pixel at the same instant the
-                panel takes one, in the same place. */}
-            <motion.button
+          // One box per section: 12px of padding top and bottom, a rule along
+          // the bottom, and everything the section has inside it.
+          <div
+            key={id}
+            className="border-b border-[rgba(0,0,0,0.1)] py-3"
+          >
+            <button
               type="button"
               onClick={() => setOpen(isOpen ? null : id)}
               aria-expanded={isOpen}
               aria-controls={`services-${id}`}
-              initial={false}
-              animate={{ borderBottomWidth: isOpen ? 0 : 1 }}
-              transition={{ duration: 0, delay: isOpen ? 0 : PANEL_MS }}
-              className="flex w-full items-center gap-1.5 border-b-0 border-[rgba(0,0,0,0.1)] py-3 outline-none focus-visible:outline-none"
+              className="flex w-full items-center gap-1.5 outline-none focus-visible:outline-none"
             >
               <span className={HEADING}>{label}</span>
               <PlusMinusIcon open={isOpen} />
-            </motion.button>
+            </button>
 
-            {/* The rule is drawn on this box rather than around the list
-                inside it, which is what makes the movement read properly:
-                the line is the bottom edge of the thing that is growing, so
-                it travels down with it — and everything below travels with it
-                too — instead of fading in once there is room for it. It comes
-                on the instant the panel starts opening and goes off only once
-                it has finished closing; at both of those moments the panel is
-                nothing but its own rule, sitting exactly where the heading's
-                was. Nothing here fades; it only moves. */}
             <motion.div
               id={`services-${id}`}
               initial={false}
-              animate={{
-                height: isOpen ? "auto" : 0,
-                borderBottomWidth: isOpen ? 1 : 0,
-              }}
-              transition={{
-                height: { duration: PANEL_MS, ease: [0.22, 1, 0.36, 1] },
-                borderBottomWidth: { duration: 0, delay: isOpen ? 0 : PANEL_MS },
-              }}
-              className="overflow-hidden border-b-0 border-[rgba(0,0,0,0.1)]"
+              animate={{ height: isOpen ? "auto" : 0 }}
+              transition={{ duration: PANEL_MS, ease: [0.22, 1, 0.36, 1] }}
+              className="overflow-hidden"
               // Closed means closed for keyboards and screen readers too.
               inert={!isOpen}
               aria-hidden={!isOpen}
             >
-              <div className="flex flex-col gap-2 py-3">
+              {/* 12px from the heading to the first row, and nothing below —
+                  the box's own padding closes the section off. */}
+              <div className="flex flex-col gap-2 pt-3">
                 {Array.from({ length: rows }).map((_, row) => (
                   <div key={row} className="flex gap-3">
                     {items.slice(row * 2, row * 2 + 2).map((item) => (
