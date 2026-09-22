@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
  *
  * Read in Asia/Jakarta rather than from the visitor's clock, so it says what
  * time it is *there* wherever it's read from. The design writes it as
- * "16:24 pm (UTC+7)" — a 24-hour clock that still carries am/pm — and this
+ * "16:24 pm / UTC+7" — a 24-hour clock that still carries am/pm — and this
  * follows the design.
  *
  * Nothing is rendered until the component has mounted. The page is
@@ -30,7 +30,7 @@ function jakartaNow() {
   const hour = Number(hhmm.slice(0, 2)) % 24;
   return `${String(hour).padStart(2, "0")}${hhmm.slice(2)} ${
     hour < 12 ? "am" : "pm"
-  } (UTC+7)`;
+  } / UTC+7`;
 }
 
 export default function JakartaClock({ className }: { className?: string }) {

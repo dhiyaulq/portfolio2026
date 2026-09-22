@@ -8,9 +8,9 @@ import SocialLinks from "@/components/SocialLinks";
 
 // The two small lines the sidebar is hung between — the clock at the top and
 // the copyright at the bottom (Figma 187:1609 and 186:1428). 13px/16px,
-// 0.065px tracking, #626262.
+// 0.065px tracking, #737373.
 const SMALL =
-  "text-[13px] leading-4 tracking-[0.065px] text-[#626262] whitespace-nowrap";
+  "text-[13px] leading-4 tracking-[0.065px] text-[#737373] whitespace-nowrap";
 
 export default function Sidebar() {
   return (

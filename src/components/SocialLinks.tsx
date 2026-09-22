@@ -1,37 +1,32 @@
+import { Fragment } from "react";
 import { siteConfig } from "@/lib/siteConfig";
 
 /**
  * The three places to find Dhiya, bottom right of the sidebar
- * (Figma 192:2321). 16px icons, 8px apart.
+ * (Figma 192:2321). 16px marks 4px apart, separated by slashes.
  *
- * Drawn inline rather than loaded as images so they can take their colour
- * from the link — these are stroked icons, and the stroke follows
- * currentColor, which is what lets them lift to the body colour on hover.
+ * Drawn inline rather than loaded as images so they take their colour from
+ * the link — which is what lets them lift to the body colour on hover. The
+ * LinkedIn mark is a filled shape and the other two are strokes, so one
+ * follows `fill` and the others `stroke`; both resolve to currentColor.
  */
 type IconProps = { className?: string };
 
+/** akar-icons:linkedin-fill (194:2326). */
 function LinkedInIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 16 16" fill="none" className={className} aria-hidden>
-      <g stroke="currentColor" strokeLinejoin="round">
-        <path d="M4.66667 6.66667V11.3333" strokeLinecap="square" />
-        <path
-          d="M7.33333 8.66667V11.3333M7.33333 8.66667C7.33333 7.56207 8.22873 6.66667 9.33333 6.66667C10.4379 6.66667 11.3333 7.56207 11.3333 8.66667V11.3333M7.33333 8.66667V6.66667"
-          strokeLinecap="square"
-        />
-        <path
-          d="M4.75 4.5H4.66667M4.83333 4.5C4.83333 4.59205 4.75871 4.66667 4.66667 4.66667C4.57462 4.66667 4.5 4.59205 4.5 4.5C4.5 4.40795 4.57462 4.33333 4.66667 4.33333C4.75871 4.33333 4.83333 4.40795 4.83333 4.5Z"
-          strokeLinecap="round"
-        />
-        <path
-          d="M2 8C2 5.17157 2 3.75736 2.87868 2.87868C3.75736 2 5.17157 2 8 2C10.8284 2 12.2427 2 13.1213 2.87868C14 3.75736 14 5.17157 14 8C14 10.8284 14 12.2427 13.1213 13.1213C12.2427 14 10.8284 14 8 14C5.17157 14 3.75736 14 2.87868 13.1213C2 12.2427 2 10.8284 2 8Z"
-          strokeLinecap="round"
-        />
-      </g>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        fill="currentColor"
+        d="M6.286 5.97933H8.762V7.21267C9.11867 6.50333 10.0333 5.866 11.4073 5.866C14.0413 5.866 14.6667 7.278 14.6667 9.86867V14.6667H12V10.4587C12 8.98333 11.6433 8.15133 10.7353 8.15133C9.476 8.15133 8.95267 9.048 8.95267 10.458V14.6667H6.286V5.97933ZM1.71333 14.5533H4.38V5.866H1.71333V14.5533ZM4.762 3.03333C4.7621 3.25685 4.71777 3.47816 4.63159 3.68439C4.54541 3.89063 4.4191 4.07768 4.26 4.23467C4.10043 4.39341 3.91114 4.51916 3.70295 4.60472C3.49476 4.69028 3.27175 4.73399 3.04667 4.73333C2.59307 4.73231 2.15794 4.55352 1.83467 4.23533C1.6762 4.07776 1.55035 3.8905 1.46433 3.68425C1.37831 3.47799 1.33379 3.25681 1.33333 3.03333C1.33333 2.582 1.51333 2.15 1.83533 1.83133C2.1578 1.51192 2.59345 1.33292 3.04733 1.33333C3.502 1.33333 3.938 1.51267 4.26 1.83133C4.582 2.15 4.762 2.582 4.762 3.03333Z"
+      />
     </svg>
   );
 }
 
+/** instagram (192:2313). */
 function InstagramIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 16 16" fill="none" className={className} aria-hidden>
@@ -47,13 +42,17 @@ function InstagramIcon({ className }: IconProps) {
   );
 }
 
+/** hugeicons:new-twitter (194:2329) — the mark on its own, no surround. */
 function XIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 16 16" fill="none" className={className} aria-hidden>
-      <g stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M1.66675 8C1.66675 5.01444 1.66675 3.52166 2.59424 2.59416C3.52174 1.66667 5.01452 1.66667 8.00007 1.66667C10.9857 1.66667 12.4784 1.66667 13.4059 2.59416C14.3334 3.52166 14.3334 5.01444 14.3334 8C14.3334 10.9855 14.3334 12.4783 13.4059 13.4059C12.4784 14.3333 10.9857 14.3333 8.00007 14.3333C5.01452 14.3333 3.52174 14.3333 2.59424 13.4059C1.66675 12.4783 1.66675 10.9855 1.66675 8Z" />
-        <path d="M4.66675 11.3333L7.46247 8.53767M8.53773 7.46233L11.3334 11.3333H9.48153L7.46247 8.53767L4.66675 4.66667H6.5186L8.53773 7.46233ZM11.3334 4.66667L8.53773 7.46233" />
-      </g>
+      <path
+        d="M2 14L7.032 8.968M7.032 8.968L2 2H5.33333L8.968 7.032M7.032 8.968L10.6667 14H14L8.968 7.032M14 2L8.968 7.032"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -66,20 +65,29 @@ const ICONS = {
 
 export default function SocialLinks() {
   return (
-    <div className="flex shrink-0 items-center gap-2">
-      {siteConfig.socials.map(({ id, label, href }) => {
+    <div className="flex shrink-0 items-center gap-1">
+      {siteConfig.socials.map(({ id, label, href }, i) => {
         const Icon = ICONS[id];
         return (
-          <a
-            key={id}
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={label}
-            className="text-[#626262] transition-colors hover:text-foreground"
-          >
-            <Icon className="h-4 w-4" />
-          </a>
+          <Fragment key={id}>
+            {i > 0 && (
+              <span
+                aria-hidden
+                className="text-[13px] leading-4 tracking-[0.065px] text-[#a6a6a6]"
+              >
+                /
+              </span>
+            )}
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={label}
+              className="text-[#737373] transition-colors hover:text-foreground"
+            >
+              <Icon className="h-4 w-4" />
+            </a>
+          </Fragment>
         );
       })}
     </div>
