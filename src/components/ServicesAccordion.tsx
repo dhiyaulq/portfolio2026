@@ -96,6 +96,10 @@ function SkillBadge({
   );
 }
 
+// How long the panel takes to open or shut. The two rules hand over to each
+// other at the ends of it, so they share the number.
+const PANEL_MS = 0.34;
+
 const SECTIONS = [
   { id: "design", label: "Design", items: siteConfig.design, tone: "dark" },
   {
@@ -126,30 +130,36 @@ export default function ServicesAccordion() {
         const rows = Math.ceil(items.length / 2);
         return (
           <div key={id}>
-            <button
+            {/* The heading's rule belongs to it only while the section is
+                shut. Open, there is no line between the heading and its list
+                (Figma 186:1198) — the line below is the panel's own, and the
+                handover is what makes the movement read as one line coming
+                away from the heading and travelling down. It costs nothing in
+                height: the heading gives up a pixel at the same instant the
+                panel takes one, in the same place. */}
+            <motion.button
               type="button"
               onClick={() => setOpen(isOpen ? null : id)}
               aria-expanded={isOpen}
               aria-controls={`services-${id}`}
-              className="flex w-full items-center gap-1.5 border-b border-[rgba(0,0,0,0.1)] py-3 outline-none focus-visible:outline-none"
+              initial={false}
+              animate={{ borderBottomWidth: isOpen ? 0 : 1 }}
+              transition={{ duration: 0, delay: isOpen ? 0 : PANEL_MS }}
+              className="flex w-full items-center gap-1.5 border-b-0 border-[rgba(0,0,0,0.1)] py-3 outline-none focus-visible:outline-none"
             >
               <span className={HEADING}>{label}</span>
               <PlusMinusIcon open={isOpen} />
-            </button>
+            </motion.button>
 
-            {/* The open list carries its own rule underneath (Figma 185:913),
-                so an open section reads as closed off rather than running
-                into the heading below it.
-
-                That rule is drawn on this box rather than around the list
+            {/* The rule is drawn on this box rather than around the list
                 inside it, which is what makes the movement read properly:
                 the line is the bottom edge of the thing that is growing, so
-                it travels down with it — and everything below travels with
-                it too — instead of fading in once there is room for it. It
-                is switched on the instant the panel starts opening and off
-                only once it has finished closing, which is invisible either
-                way: at that moment it sits directly under the heading's own
-                rule. Nothing here fades; it only moves. */}
+                it travels down with it — and everything below travels with it
+                too — instead of fading in once there is room for it. It comes
+                on the instant the panel starts opening and goes off only once
+                it has finished closing; at both of those moments the panel is
+                nothing but its own rule, sitting exactly where the heading's
+                was. Nothing here fades; it only moves. */}
             <motion.div
               id={`services-${id}`}
               initial={false}
@@ -158,8 +168,8 @@ export default function ServicesAccordion() {
                 borderBottomWidth: isOpen ? 1 : 0,
               }}
               transition={{
-                height: { duration: 0.34, ease: [0.22, 1, 0.36, 1] },
-                borderBottomWidth: { duration: 0, delay: isOpen ? 0 : 0.34 },
+                height: { duration: PANEL_MS, ease: [0.22, 1, 0.36, 1] },
+                borderBottomWidth: { duration: 0, delay: isOpen ? 0 : PANEL_MS },
               }}
               className="overflow-hidden border-b-0 border-[rgba(0,0,0,0.1)]"
               // Closed means closed for keyboards and screen readers too.
