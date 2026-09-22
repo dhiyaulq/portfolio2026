@@ -7,8 +7,8 @@ import { useEffect, useState } from "react";
  *
  * Read in Asia/Jakarta rather than from the visitor's clock, so it says what
  * time it is *there* wherever it's read from. The design writes it as
- * "16:24 pm / UTC+7" — a 24-hour clock that still carries am/pm — and this
- * follows the design.
+ * "16:24 pm / UTC+7" — a 24-hour clock that still carries am/pm, with the
+ * slash a shade lighter than the rest — and this follows the design.
  *
  * Nothing is rendered until the component has mounted. The page is
  * prerendered and revalidated at most once a minute, so any time baked into
@@ -30,7 +30,7 @@ function jakartaNow() {
   const hour = Number(hhmm.slice(0, 2)) % 24;
   return `${String(hour).padStart(2, "0")}${hhmm.slice(2)} ${
     hour < 12 ? "am" : "pm"
-  } / UTC+7`;
+  }`;
 }
 
 export default function JakartaClock({ className }: { className?: string }) {
@@ -55,6 +55,14 @@ export default function JakartaClock({ className }: { className?: string }) {
   return (
     <p className={className} suppressHydrationWarning>
       {time ?? " "}
+      {time && (
+        <>
+          {/* The slash is a shade lighter than what it separates, the same
+              way it is between the marks in the footer. */}
+          <span className="text-[#a6a6a6]">{" / "}</span>
+          UTC+7
+        </>
+      )}
     </p>
   );
 }
