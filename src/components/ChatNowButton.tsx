@@ -42,12 +42,12 @@ export default function ChatNowButton({ href }: { href: string }) {
           draws the edge in Figma's render is its drop-shadow hugging the
           silhouette all the way round, which a CSS box-shadow can't do from
           those offsets: measured off the render, the edge falls to #DBDBDB at
-          its darkest and averages about #E0E0E0 across the pixel and a bit it
-          covers. 30% grey lands a crisp 1px line on that average. */}
+          its darkest. 10% grey is a good deal lighter than that — a #F5F5F5
+          line, which is where this landed by eye. */}
       <span
         aria-hidden
         className="pointer-events-none absolute inset-0 rounded-full"
-        style={{ boxShadow: "inset 0 0 0 1px rgba(153,153,153,0.3)" }}
+        style={{ boxShadow: "inset 0 0 0 1px rgba(153,153,153,0.1)" }}
       />
     </motion.a>
   );
