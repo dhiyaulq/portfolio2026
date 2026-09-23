@@ -1,4 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 32 32" fill="#191717">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 32 32">
+  <!--
+    The mark follows the browser's colour scheme: near-black on a light tab
+    strip, white on a dark one. An SVG favicon carries its own stylesheet and
+    the media query is evaluated by the browser, so this needs no script and
+    no second file. Browsers that don't support SVG favicons ignore the whole
+    icon, as they already did.
+
+    The fill is set in CSS rather than as an attribute on purpose — CSS wins
+    over a presentation attribute, but only if the attribute isn't on the
+    element the rule targets, so keeping it in one place avoids a fill that
+    can't be overridden in dark mode.
+  -->
+  <style>
+    path { fill: #191717; }
+    @media (prefers-color-scheme: dark) {
+      path { fill: #ffffff; }
+    }
+  </style>
   <path d="M13.959 22.7042C13.959 23.2415 14.3993 23.6802 14.9369 23.6198C20.0234 23.0482 23.9999 18.064 23.9999 12C23.9999 5.93593 20.0234 0.951746 14.9369 0.380165C14.3993 0.319753 13.959 0.75842 13.959 1.29572C13.959 2.7295 13.959 5.92529 13.959 12C13.959 18.0746 13.959 21.2704 13.959 22.7042Z"/>
   <path d="M10.2856 23.1897C10.2856 23.7271 10.7435 24.1709 11.2298 23.9352C13.483 22.8428 15.1836 17.9145 15.1836 12C15.1836 6.08551 13.483 1.15719 11.2298 0.0647777C10.7435 -0.170919 10.2856 0.2729 10.2856 0.810203C10.2856 2.28408 10.2856 5.61576 10.2856 12C10.2856 18.3842 10.2856 21.7159 10.2856 23.1897Z"/>
   <path d="M5.87744 21.9742C5.87744 22.5114 6.34838 22.9367 6.77962 22.6123C8.37223 21.4142 9.55093 17.1172 9.55093 12C9.55093 6.88279 8.37223 2.58581 6.77962 1.38768C6.34838 1.06324 5.87744 1.48849 5.87744 2.02579C5.87744 3.39857 5.87744 6.38964 5.87744 12C5.87744 17.6103 5.87744 20.6014 5.87744 21.9742Z"/>
