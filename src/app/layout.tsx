@@ -10,8 +10,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Dhiya — Portfolio",
-  description: "Selected work by Dhiya, a product designer based in Indonesia.",
+  title: "Dsign Space",
+  description:
+    "Dhiya Ulhaq Mahmud is an Indonesian product designer crafting UI/UX interfaces, websites, and brand identities for growing teams. Explore portfolio",
 };
 
 export default function RootLayout({
