@@ -67,11 +67,9 @@ export const NO_TAP_HIGHLIGHT: CSSProperties = { WebkitTapHighlightColor: "trans
  * deflating and sinking without the bounce. Opacity runs on its own short
  * tween so the fade doesn't wobble with the spring.
  *
- * `fromY` is where it comes from, relative to where it settles: the switcher
- * sits at the bottom of the screen and rises into place (+28), a menu hangs
- * off the bottom of its button and drops out of it (-28). Pair it with a
- * transform origin on the edge it grows from — 50% 100% for the switcher,
- * 0% 0% for a menu under the left of a button — or it will grow from its
+ * `fromY` is where it comes from, relative to where it settles — the switcher
+ * sits at the bottom of the screen and rises into place. Pair it with a
+ * transform origin on the edge it grows from, or it will grow from its
  * middle and the effect is lost.
  */
 export function popVariants(fromY = 28): Variants {
@@ -105,6 +103,3 @@ export function popVariants(fromY = 28): Variants {
 
 /** The switcher's bars, rising from the bottom of the screen. */
 export const DOCK_VARIANTS = popVariants();
-
-/** A menu dropping out of the button above it. */
-export const MENU_VARIANTS = popVariants(-28);

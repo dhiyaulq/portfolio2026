@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { MENU_VARIANTS } from "@/components/glassDock";
 
 const SHADOW_IDLE =
   "0px 7px 1px rgba(0,0,0,0), 0px 5px 1px rgba(0,0,0,0.01), 0px 3px 1px rgba(0,0,0,0.03), 0px 1px 0.5px rgba(0,0,0,0.04), 0px 0px 0.5px rgba(0,0,0,0.05)";
@@ -33,7 +32,11 @@ export type ChatOption = {
  * something. Escape hands focus back to the button; the arrow keys move
  * between the options, so the whole thing works without a pointer.
  */
-export default function ChatNowButton({ options }: { options: readonly ChatOption[] }) {
+export default function ChatNowButton({
+  options,
+}: {
+  options: readonly ChatOption[];
+}) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -78,7 +81,9 @@ export default function ChatNowButton({ options }: { options: readonly ChatOptio
             setOpen(true);
             // The list isn't mounted yet on the frame the key lands.
             requestAnimationFrame(() =>
-              itemRefs.current[e.key === "ArrowDown" ? 0 : options.length - 1]?.focus()
+              itemRefs.current[
+                e.key === "ArrowDown" ? 0 : options.length - 1
+              ]?.focus(),
             );
           }
         }}
@@ -99,7 +104,9 @@ export default function ChatNowButton({ options }: { options: readonly ChatOptio
         // keeps it 34px tall next to the primary button.
         className="relative flex items-center gap-1.5 rounded-full px-2 py-1.5"
       >
-        <span className="text-sm font-medium leading-[22px] text-[#1e1e1e]">Chat Now</span>
+        <span className="text-sm font-medium leading-[22px] text-[#1e1e1e]">
+          Chat Now
+        </span>
         {/* solar:alt-arrow-down-linear (223:5128). Drawn inline rather than
             loaded as an image so it can turn over when the menu opens. */}
         <motion.svg
@@ -143,57 +150,69 @@ export default function ChatNowButton({ options }: { options: readonly ChatOptio
             id={menuId}
             role="menu"
             aria-label="Chat"
-            // The same arrival as the layout switcher's bars: a springy
-            // scale-up with a little overshoot, and the reverse without the
-            // bounce on the way out. Mirrored, because this one belongs to
-            // the button above it rather than to the bottom of the screen —
-            // it drops out of the button instead of rising off the edge.
-            initial="hidden"
-            animate="shown"
-            exit="hidden"
-            variants={MENU_VARIANTS}
+            // It unrolls: the panel's height runs from nothing to its full
+            // 76px and the options are revealed by the edge passing over
+            // them, rather than the whole thing being scaled up. Nothing
+            // about it distorts — text scaled vertically for a fifth of a
+            // second is exactly what makes a dropdown feel cheap — and there
+            // is no overshoot, because a menu that springs is a menu whose
+            // options are still moving when you go to click one.
+            //
+            // The box-shadow is drawn on this element, so `overflow-hidden`
+            // clips the contents without clipping the shadow.
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{
+              height: { duration: 0.24, ease: [0.22, 1, 0.36, 1] },
+              opacity: { duration: 0.14, ease: "easeOut" },
+            }}
             // Hung off the button's left edge, 6px under it (223:5410).
-            className="absolute left-0 top-full z-20 mt-1.5 w-[118px] rounded-[20px] bg-white p-1 backdrop-blur-[3px]"
+            className="absolute left-0 top-full z-20 mt-1.5 w-[118px] overflow-hidden rounded-[20px] bg-white backdrop-blur-[3px]"
             style={{
               boxShadow: `${MENU_SHADOW}, inset 0 0 0 1px rgba(0,0,0,0.04)`,
-              // It grows from the corner nearest the button, not its middle.
-              transformOrigin: "0% 0%",
-              willChange: "transform, opacity",
+              willChange: "height, opacity",
             }}
           >
-            {options.map(({ id, label, href }, i) => (
-              <a
-                key={id}
-                ref={(el) => {
-                  itemRefs.current[i] = el;
-                }}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                role="menuitem"
-                onClick={() => setOpen(false)}
-                onKeyDown={(e) => {
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    moveFocus(i, 1);
-                  } else if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    moveFocus(i, -1);
-                  }
-                }}
-                className="flex items-center gap-1 rounded-full py-1.5 pl-2 pr-3 outline-none transition-colors hover:bg-[#f6f6f6] focus-visible:bg-[#f6f6f6]"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={id === "whatsapp" ? "/icons/whatsapp.svg" : "/icons/telegram-mark.svg"}
-                  alt=""
-                  className="h-5 w-5 shrink-0"
-                />
-                <span className="whitespace-nowrap text-sm font-medium leading-[22px] text-[#1e1e1e]">
-                  {label}
-                </span>
-              </a>
-            ))}
+            <div className="p-1">
+              {options.map(({ id, label, href }, i) => (
+                <a
+                  key={id}
+                  ref={(el) => {
+                    itemRefs.current[i] = el;
+                  }}
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  role="menuitem"
+                  onClick={() => setOpen(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      moveFocus(i, 1);
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      moveFocus(i, -1);
+                    }
+                  }}
+                  className="flex items-center gap-1 rounded-full py-1.5 pl-2 pr-3 outline-none transition-colors hover:bg-[#f6f6f6] focus-visible:bg-[#f6f6f6]"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={
+                      id === "whatsapp"
+                        ? "/icons/whatsapp.svg"
+                        : "/icons/telegram-mark.svg"
+                    }
+                    alt=""
+                    className="h-5 w-5 shrink-0"
+                  />
+                  <span className="whitespace-nowrap text-sm font-medium leading-[22px] text-[#1e1e1e]">
+                    {label}
+                  </span>
+                </a>
+              ))}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
