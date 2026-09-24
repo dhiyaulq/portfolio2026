@@ -9,11 +9,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { AnimatePresence, motion, type Variants } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   DOCK_BUTTON_CLASS,
   DOCK_CLASS,
   DOCK_STYLE,
+  DOCK_VARIANTS,
   ICON_ACTIVE,
   ICON_INACTIVE,
   NO_TAP_HIGHLIGHT,
@@ -216,38 +217,6 @@ const AXES: Item<Axis>[] = [
   { id: "z1", label: "Z - 1", icon: AxisZ1Icon },
   { id: "z2", label: "Z - 2", icon: AxisZ2Icon },
 ];
-
-// Pop-in for a bar: it inflates from its bottom edge like a balloon — a
-// springy scale-up with a little overshoot while it rises into place — and
-// hiding plays the same motion backwards, deflating and sinking without the
-// bounce. Opacity runs on its own short tween so the fade doesn't wobble
-// with the spring.
-const DOCK_VARIANTS: Variants = {
-  shown: {
-    opacity: 1,
-    scale: 1,
-    y: 0,
-    transition: {
-      type: "spring",
-      stiffness: 380,
-      damping: 19,
-      mass: 0.8,
-      opacity: { duration: 0.18, ease: "easeOut" },
-    },
-  },
-  hidden: {
-    opacity: 0,
-    scale: 0.4,
-    y: 28,
-    transition: {
-      type: "spring",
-      stiffness: 420,
-      damping: 34,
-      mass: 0.8,
-      opacity: { duration: 0.16, delay: 0.06, ease: "easeIn" },
-    },
-  },
-};
 
 // Pre-promote the layer so the pop-in doesn't have to re-rasterise the
 // blurred glass on its first frames — noticeable on phones.

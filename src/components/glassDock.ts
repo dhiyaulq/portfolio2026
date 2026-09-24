@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import type { Variants } from "framer-motion";
 
 /**
  * "Liquid glass" dock styling (Figma 88:826) for the layout switcher.
@@ -58,3 +59,52 @@ export const DOCK_BUTTON_CLASS =
   "group relative flex items-center rounded-full outline-none transition-colors focus:outline-none focus-visible:outline-none";
 
 export const NO_TAP_HIGHLIGHT: CSSProperties = { WebkitTapHighlightColor: "transparent" };
+
+/**
+ * How anything in this family arrives: it inflates from the edge it belongs
+ * to like a balloon — a springy scale-up with a little overshoot while it
+ * moves into place — and leaves by playing the same motion backwards,
+ * deflating and sinking without the bounce. Opacity runs on its own short
+ * tween so the fade doesn't wobble with the spring.
+ *
+ * `fromY` is where it comes from, relative to where it settles: the switcher
+ * sits at the bottom of the screen and rises into place (+28), a menu hangs
+ * off the bottom of its button and drops out of it (-28). Pair it with a
+ * transform origin on the edge it grows from — 50% 100% for the switcher,
+ * 0% 0% for a menu under the left of a button — or it will grow from its
+ * middle and the effect is lost.
+ */
+export function popVariants(fromY = 28): Variants {
+  return {
+    shown: {
+      opacity: 1,
+      scale: 1,
+      y: 0,
+      transition: {
+        type: "spring",
+        stiffness: 380,
+        damping: 19,
+        mass: 0.8,
+        opacity: { duration: 0.18, ease: "easeOut" },
+      },
+    },
+    hidden: {
+      opacity: 0,
+      scale: 0.4,
+      y: fromY,
+      transition: {
+        type: "spring",
+        stiffness: 420,
+        damping: 34,
+        mass: 0.8,
+        opacity: { duration: 0.16, delay: 0.06, ease: "easeIn" },
+      },
+    },
+  };
+}
+
+/** The switcher's bars, rising from the bottom of the screen. */
+export const DOCK_VARIANTS = popVariants();
+
+/** A menu dropping out of the button above it. */
+export const MENU_VARIANTS = popVariants(-28);

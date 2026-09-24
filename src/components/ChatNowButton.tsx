@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { MENU_VARIANTS } from "@/components/glassDock";
 
 const SHADOW_IDLE =
   "0px 7px 1px rgba(0,0,0,0), 0px 5px 1px rgba(0,0,0,0.01), 0px 3px 1px rgba(0,0,0,0.03), 0px 1px 0.5px rgba(0,0,0,0.04), 0px 0px 0.5px rgba(0,0,0,0.05)";
@@ -142,13 +143,23 @@ export default function ChatNowButton({ options }: { options: readonly ChatOptio
             id={menuId}
             role="menu"
             aria-label="Chat"
-            initial={{ opacity: 0, scale: 0.94, y: -6 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.94, y: -6 }}
-            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            // The same arrival as the layout switcher's bars: a springy
+            // scale-up with a little overshoot, and the reverse without the
+            // bounce on the way out. Mirrored, because this one belongs to
+            // the button above it rather than to the bottom of the screen —
+            // it drops out of the button instead of rising off the edge.
+            initial="hidden"
+            animate="shown"
+            exit="hidden"
+            variants={MENU_VARIANTS}
             // Hung off the button's left edge, 6px under it (223:5410).
-            className="absolute left-0 top-full z-20 mt-1.5 w-[118px] origin-top-left rounded-[20px] bg-white p-1 backdrop-blur-[3px]"
-            style={{ boxShadow: `${MENU_SHADOW}, inset 0 0 0 1px rgba(0,0,0,0.04)` }}
+            className="absolute left-0 top-full z-20 mt-1.5 w-[118px] rounded-[20px] bg-white p-1 backdrop-blur-[3px]"
+            style={{
+              boxShadow: `${MENU_SHADOW}, inset 0 0 0 1px rgba(0,0,0,0.04)`,
+              // It grows from the corner nearest the button, not its middle.
+              transformOrigin: "0% 0%",
+              willChange: "transform, opacity",
+            }}
           >
             {options.map(({ id, label, href }, i) => (
               <a
