@@ -12,6 +12,8 @@
 let ctx: AudioContext | null = null;
 let buffer: AudioBuffer | null = null;
 let noise: AudioBuffer | null = null;
+// Built on first use and kept for the life of the context.
+let settleBus: AudioNode | null = null;
 let lastPlayed = 0;
 let lastCard = 0;
 let coarsePointer: boolean | undefined;
@@ -78,9 +80,18 @@ function buildBuffer(context: AudioContext) {
   return out;
 }
 
-/** One second of white noise, the raw material for both card sounds. */
+/**
+ * Two seconds of white noise, the raw material for every card sound.
+ *
+ * Long on purpose. Fourteen cards landing together each read a random
+ * stretch of this, and two voices playing the SAME stretch at the same
+ * moment are correlated — correlated voices add straight, so their peaks
+ * double rather than growing as the square root of their number. Half a
+ * second of noise couldn't hold fourteen 180ms reads without heavy overlap,
+ * and the crowd peaked seventeen times a single card instead of four.
+ */
 function buildNoise(context: BaseAudioContext) {
-  const length = Math.floor(context.sampleRate * 0.5);
+  const length = Math.floor(context.sampleRate * 2);
   const out = context.createBuffer(1, length, context.sampleRate);
   const data = out.getChannelData(0);
   for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
@@ -133,6 +144,9 @@ export function buildCardSound(
   band.type = "bandpass";
   band.Q.value = deal ? 0.8 : 0.9;
   const gain = context.createGain();
+  // See buildSettleSound: silent before the first scheduled event, or one
+  // sample of raw noise escapes at the node's default gain of 1.
+  gain.gain.value = 0.0001;
 
   if (deal) {
     // The slide: the band opens upward as the card speeds up, and the level
@@ -157,6 +171,7 @@ export function buildCardSound(
     high.type = "highpass";
     high.frequency.value = 3800;
     const snapGain = context.createGain();
+    snapGain.gain.value = 0.0001;
     snapGain.gain.setValueAtTime(0.0001, at + DRAW_RELEASE - 0.004);
     // Half the nominal level: high noise is spiky, and at full gain the
     // release peaked three times as high as the tick for the same loudness.
@@ -182,6 +197,7 @@ export function buildCardSound(
   const body = context.createOscillator();
   body.frequency.value = 170 * vary;
   const bodyGain = context.createGain();
+  bodyGain.gain.value = 0;
   bodyGain.gain.setValueAtTime(0, at);
   bodyGain.gain.linearRampToValueAtTime(volume * 0.09, at + 0.003);
   bodyGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.025);
@@ -193,93 +209,131 @@ export function buildCardSound(
 /**
  * One card coming to rest on a pile — the sound a layout change is made of.
  *
- * On its own it's almost nothing: a breath of noise well under the tick, with
- * a soft attack and no impact in it. It isn't meant to be heard on its own. A
- * layout change lands a dozen of these a few tens of milliseconds apart,
- * because each card takes a different time to reach its new slot, and a dozen
- * soft landings at uneven intervals is what shuffling cards actually is.
+ * Built to measurement rather than to intuition, because intuition kept
+ * getting it backwards. A reference recording of real cards was analysed,
+ * and the sound in it is BRIGHT and CONTINUOUS: its spectral centre is
+ * 4597Hz, a third of its energy sits between 2 and 5kHz and a quarter above
+ * 5kHz, and its envelope stays flat for half a second with a crest factor
+ * near 2 — a dense rustle, not a series of events.
  *
- * Everything here is aimed at taking the edge off. Harshness in a synthesised
- * noise burst comes from two places: energy in the 2-5kHz band, where the ear
- * is most sensitive and least forgiving, and an attack fast enough to read as
- * a click. So the band sits down at 1kHz, the top is taken off by two lowpass
- * poles at 2.8kHz rather than one at 7 — the single biggest difference — and
- * the level fades in over 20ms, slow enough to leave no transient at all.
- * Measured against the version this replaced: the spectral centre drops from
- * 2460Hz to 1257Hz, the share of energy in the band that stings falls from
- * 0.33 to 0.19, and the 10-90% attack goes from 3ms to 7ms. It sits 7dB
- * under the tick, and fourteen of them overlapping still peak below it.
+ * Every earlier attempt here went the other way. Told the sound was harsh,
+ * the obvious move was to darken it, which took the centre down to 1257Hz
+ * and made it duller AND no less synthetic. The harshness was never the
+ * brightness: it was the resonance. A bandpass with any Q at all gives noise
+ * a pitch, and a pitched click is what "harsh" meant. Paper has no pitch —
+ * it's broadband with a gentle lift where the fibres speak.
  *
- * Every one differs slightly in pitch, length and weight; identical repeats
- * are what made earlier attempts sound synthetic rather than physical.
+ * So there's no bandpass. White noise, a highpass to keep rumble out, a
+ * lowpass to stop it hissing, and one broad +8dB lift around 3.5kHz — the
+ * only part that varies per card, because a fixed one would make fourteen
+ * identical copies. Measured against the reference's own six-band profile,
+ * the error is 0.20 where the version this replaces scored 3.44.
+ *
+ * Each one also lasts longer than the gap between two cards landing, which
+ * is what makes a dozen of them overlap into the continuous rustle the
+ * reference is, rather than reading as a dozen separate taps.
  */
-const SETTLE_VOLUME = 0.075;
+const SETTLE_VOLUME = 0.011;
+
+/**
+ * The shared chain every landing goes through: the filtering is identical
+ * for every voice, so this way it's three nodes in total rather than three
+ * per card.
+ *
+ * Deliberately NOT a compressor. The obvious way to hold fourteen voices
+ * down is to put a DynamicsCompressorNode here, and it does the opposite:
+ * the Web Audio compressor applies its own makeup gain, so a signal this
+ * quiet comes out LOUDER — measured, a single card went from 0.029 to 0.107
+ * with one in the chain. The crowd is handled where it's created instead,
+ * by asking each voice for less as more of them arrive.
+ */
+export function createSettleBus(
+  context: BaseAudioContext,
+  destination: AudioNode
+) {
+  const high = context.createBiquadFilter();
+  high.type = "highpass";
+  high.frequency.value = 700;
+  high.Q.value = 0.6;
+  // Two poles: one leaves enough 300-600Hz that a crowd of them rumbles.
+  const high2 = context.createBiquadFilter();
+  high2.type = "highpass";
+  high2.frequency.value = 700;
+  high2.Q.value = 0.6;
+
+  const air = context.createBiquadFilter();
+  air.type = "lowpass";
+  air.frequency.value = 9500;
+  air.Q.value = 0.6;
+
+  high.connect(high2).connect(air).connect(destination);
+  return high;
+}
 
 export function buildSettleSound(
   context: BaseAudioContext,
   noiseBuffer: AudioBuffer,
   at: number,
-  destination: AudioNode,
+  bus: AudioNode,
+  /** How many cards have already landed in this change; they share the air. */
+  voice = 0,
   volume = SETTLE_VOLUME
 ) {
-  const vary = 0.85 + Math.random() * 0.3;
-  const length = (0.075 + Math.random() * 0.035) * vary;
+  const length = 0.16 + Math.random() * 0.07;
 
   const src = context.createBufferSource();
   src.buffer = noiseBuffer;
 
-  const band = context.createBiquadFilter();
-  band.type = "bandpass";
-  // Broad and low. A higher, tighter band is exactly what "harsh" means.
-  band.Q.value = 0.5;
-  const top = 1000 * vary;
-  band.frequency.setValueAtTime(top, at);
-  band.frequency.exponentialRampToValueAtTime(top * 0.55, at + length);
+  // The one shaping move that varies: a gentle lift where card stock speaks.
+  // Broad on purpose — narrow it and the pitch comes back.
+  const tilt = context.createBiquadFilter();
+  tilt.type = "peaking";
+  tilt.frequency.value = 3200 + Math.random() * 700;
+  tilt.Q.value = 0.7;
+  tilt.gain.value = 8;
 
-  // Nothing low: a card settling has no thump to it, and any low end here
-  // turns a handful of these into a rumble.
-  const high = context.createBiquadFilter();
-  high.type = "highpass";
-  high.frequency.value = 600;
-  // And nothing bright. This is the one that does most of the work, and one
-  // pole isn't enough: a single lowpass sheds 12dB an octave and leaves a
-  // shelf of 4-6kHz behind, which is precisely the part that stings. Two in
-  // series take it away properly.
-  const air = context.createBiquadFilter();
-  air.type = "lowpass";
-  air.frequency.value = 2800;
-  air.Q.value = 0.5;
-  const air2 = context.createBiquadFilter();
-  air2.type = "lowpass";
-  air2.frequency.value = 2800;
-  air2.Q.value = 0.5;
-  air.connect(air2);
-
+  // Uncorrelated sounds add as the square root of their number, so each
+  // voice takes that much less room and a full grid lands no louder than a
+  // sparse one. Without it fourteen cards were four times a single card.
+  const share = 1 / Math.sqrt(1 + voice * 0.8);
+  const level = volume * share * (0.75 + Math.random() * 0.45);
   const gain = context.createGain();
+  // Silent BEFORE anything is scheduled, not just from `at` onwards. A gain
+  // node defaults to 1, and a source starting at exactly the same moment as
+  // the first setValueAtTime can get one sample through at that default —
+  // one sample of raw noise, which is a click an order of magnitude louder
+  // than the sound it belongs to. Measured: peaks of 0.51 on a fourteen-card
+  // landing, two samples wide, at exactly the moment a voice started.
+  gain.gain.value = 0.0001;
   gain.gain.setValueAtTime(0.0001, at);
-  gain.gain.exponentialRampToValueAtTime(
-    volume * (0.7 + Math.random() * 0.5),
-    at + 0.02
-  );
+  // In over 12ms, then most of the length spent near full before it goes: a
+  // sound that drops away immediately leaves gaps between cards, and the
+  // gaps are what made this read as taps rather than a shuffle.
+  gain.gain.exponentialRampToValueAtTime(level, at + 0.012);
+  gain.gain.exponentialRampToValueAtTime(level * 0.55, at + length * 0.55);
   gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
 
-  src.connect(band).connect(high).connect(air);
-  air2.connect(gain).connect(destination);
-  src.start(at, Math.random() * 0.4, length + 0.02);
+  src.connect(tilt).connect(gain).connect(bus);
+  // Spread the reads right across the noise: two voices playing the same
+  // stretch of it at the same time are correlated, and correlated voices
+  // add straight rather than as a crowd.
+  src.start(at, Math.random() * (noiseBuffer.duration - length - 0.05), length + 0.02);
   src.stop(at + length + 0.02);
 }
 
 /**
  * A card arriving in its new place. No rate limit: several landing together
- * is the point, and the showcase caps how many it asks for.
+ * is the point, and the showcase caps how many it asks for. `voice` is how
+ * many have already landed in this layout change.
  */
-export function playSettle() {
+export function playSettle(voice = 0) {
   if (!ctx || !noise) return;
   if (ctx.state !== "running") {
     if (navigator.userActivation?.hasBeenActive) void ctx.resume();
     return;
   }
-  buildSettleSound(ctx, noise, ctx.currentTime, ctx.destination);
+  if (!settleBus) settleBus = createSettleBus(ctx, ctx.destination);
+  buildSettleSound(ctx, noise, ctx.currentTime, settleBus, voice);
 }
 
 /** Create the audio context and unlock it on the first real user gesture. */
@@ -325,6 +379,7 @@ export function primeTickSound() {
       ctx = null;
       buffer = null;
       noise = null;
+      settleBus = null;
     }
   };
 }
@@ -380,6 +435,7 @@ if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
   (window as unknown as Record<string, unknown>).__soundLab = {
     buildCardSound,
     buildSettleSound,
+    createSettleBus,
     buildTick: buildBuffer,
     buildNoise,
     VOLUME,

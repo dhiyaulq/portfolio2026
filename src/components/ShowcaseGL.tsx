@@ -1037,8 +1037,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
               screenTop < viewport.visH &&
               screenTop + t.h > 0;
             if (onScreen && settleVoices < MAX_SETTLE_SOUNDS) {
+              playSettle(settleVoices);
               settleVoices++;
-              playSettle();
               sounds.settle++;
               if (process.env.NODE_ENV === "development") {
                 settleAt.push(Math.round(now - switchedAt));
