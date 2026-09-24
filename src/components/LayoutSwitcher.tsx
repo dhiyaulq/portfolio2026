@@ -20,7 +20,7 @@ import {
   PILL_SPRING,
   PILL_STYLE,
 } from "@/components/glassDock";
-import { playFlip } from "@/lib/tickSound";
+import { playShuffle } from "@/lib/tickSound";
 
 // ---------------------------------------------------------------------------
 // The showcase has three ways of looking at the work — a column grid, a 3D
@@ -396,9 +396,9 @@ function ColumnSlider({
   const set = (next: number) => {
     const n = clampCols(next);
     if (n === cols) return;
-    // A quick riffle of pages as the grid opens or closes up. Drag through
-    // several stops and the bursts run into each other and keep shuffling.
-    playFlip();
+    // A soft shuffle of cards as the grid opens or closes up. Drag through
+    // several stops and they run into each other and keep shuffling.
+    playShuffle();
     onChange(n);
   };
 

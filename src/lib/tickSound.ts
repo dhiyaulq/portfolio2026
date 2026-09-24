@@ -191,66 +191,87 @@ export function buildCardSound(
 }
 
 /**
- * The column slider: pages riffling past a thumb — a fast paper shuffle.
+ * The column slider: a soft shuffle of cards as the grid opens or closes up.
  *
- * Not one sound but a burst of four to six, 14-26ms apart, each a sliver of
- * filtered noise with a hard decay: that spacing is the whole effect, because
- * the ear stops counting individual edges somewhere around 30ms apart and
- * hears a flutter instead. The band climbs slightly through the burst and the
- * taps get quieter, so the run reads as a flick that's running out rather
- * than a loop. Drag through several stops and the bursts land on each other
- * and it simply keeps riffling.
- *
- * (The first version of this was one smooth 150ms rub, which was the right
- * material but the wrong gesture — a single slow slide, where this is the
- * fast shuffle it should have been.)
+ * The hard lesson here is that a run of short taps is NOT a shuffle. Spaced
+ * 14-26ms apart they repeat at 40-70Hz, the ear stops hearing them as
+ * separate events and fuses them into a pitch, and a buzzing pitch in that
+ * range is a raspberry — which is exactly what the previous version sounded
+ * like. Two things prevent it. The body of the sound is continuous rather
+ * than a train of impulses, and the few pages that ride on top of it are
+ * spaced with enough jitter (12-45ms) that no repetition rate can establish
+ * itself; they also overlap, each one lasting longer than the gap to the
+ * next, so what modulation is left is gentle. Nothing below 900Hz survives
+ * the highpass either, so there's no low end for a buzz to live in.
  */
-const FLIP_VOLUME = 0.22;
-const FLIP_TAP = 0.013;
-// A burst is ~90ms, so this lets two overlap but not five.
-const FLIP_MIN_INTERVAL_MS = 55;
-let lastFlip = 0;
+const SHUFFLE_VOLUME = 0.085;
+const SHUFFLE_LENGTH = 0.22;
+// Long enough that a drag's sounds overlap into one continuous shuffle
+// rather than restarting.
+const SHUFFLE_MIN_INTERVAL_MS = 60;
+let lastShuffle = 0;
 
-export function buildFlipSound(
+export function buildShuffleSound(
   context: BaseAudioContext,
   noiseBuffer: AudioBuffer,
   at: number,
   destination: AudioNode,
-  volume = FLIP_VOLUME
+  volume = SHUFFLE_VOLUME
 ) {
-  // Every riffle is a different one: a few more or fewer pages, a slightly
-  // different thickness to them.
-  const taps = 4 + Math.floor(Math.random() * 3);
   const vary = 0.9 + Math.random() * 0.2;
 
-  // One roll-off for the whole burst: paper, not static.
+  // One bus for the whole sound: nothing low (that's where a buzz would sit)
+  // and nothing bright enough to hiss.
+  const high = context.createBiquadFilter();
+  high.type = "highpass";
+  high.frequency.value = 900;
   const air = context.createBiquadFilter();
   air.type = "lowpass";
-  air.frequency.value = 7500;
-  air.connect(destination);
+  air.frequency.value = 7000;
+  high.connect(air).connect(destination);
 
-  let t = at;
-  for (let i = 0; i < taps; i++) {
-    const src = context.createBufferSource();
-    src.buffer = noiseBuffer;
-    const band = context.createBiquadFilter();
-    band.type = "bandpass";
-    // Tight enough to be an edge rather than a hiss, broad enough not to ring.
-    band.Q.value = 1.3;
-    band.frequency.value = (1900 + i * 260) * vary;
+  // The body: one unbroken breath of noise, opening slightly as the cards
+  // pick up speed and closing as they settle.
+  const bed = context.createBufferSource();
+  bed.buffer = noiseBuffer;
+  const band = context.createBiquadFilter();
+  band.type = "bandpass";
+  // Broad. A narrow band rings, and a ringing band is a tone.
+  band.Q.value = 0.6;
+  band.frequency.setValueAtTime(1500 * vary, at);
+  band.frequency.exponentialRampToValueAtTime(2500 * vary, at + 0.07);
+  band.frequency.exponentialRampToValueAtTime(1600 * vary, at + SHUFFLE_LENGTH);
+  const bedGain = context.createGain();
+  bedGain.gain.setValueAtTime(0.0001, at);
+  bedGain.gain.exponentialRampToValueAtTime(volume, at + 0.05);
+  bedGain.gain.exponentialRampToValueAtTime(0.0001, at + SHUFFLE_LENGTH);
+  bed.connect(band).connect(bedGain).connect(high);
+  bed.start(at, Math.random() * 0.25, SHUFFLE_LENGTH + 0.02);
+  bed.stop(at + SHUFFLE_LENGTH + 0.02);
 
-    const gain = context.createGain();
-    // Each tap fades up over 2ms rather than starting flat: that's the
-    // difference between paper and a row of clicks.
-    const level = volume * (1 - (i / taps) * 0.5);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(level, t + 0.002);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + FLIP_TAP);
-
-    src.connect(band).connect(gain).connect(air);
-    src.start(t, Math.random() * 0.3, FLIP_TAP + 0.01);
-    src.stop(t + FLIP_TAP + 0.01);
-    t += 0.014 + Math.random() * 0.012;
+  // The pages: a handful of soft swells over the top, each longer than the
+  // gap to the next so they blur into the body rather than punctuating it.
+  let t = at + 0.015;
+  const until = at + SHUFFLE_LENGTH * 0.75;
+  while (t < until) {
+    const page = context.createBufferSource();
+    page.buffer = noiseBuffer;
+    const pageBand = context.createBiquadFilter();
+    pageBand.type = "bandpass";
+    pageBand.Q.value = 0.8;
+    pageBand.frequency.value = 1600 + Math.random() * 1600;
+    const pageGain = context.createGain();
+    const level = volume * (0.22 + Math.random() * 0.18);
+    const len = 0.03 + Math.random() * 0.015;
+    // 10ms to come in and the rest to go: no edge anywhere in it.
+    pageGain.gain.setValueAtTime(0.0001, t);
+    pageGain.gain.exponentialRampToValueAtTime(level, t + 0.01);
+    pageGain.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    page.connect(pageBand).connect(pageGain).connect(high);
+    page.start(t, Math.random() * 0.25, len + 0.01);
+    page.stop(t + len + 0.01);
+    // Wide, uneven spacing: this is what stops a rate from forming.
+    t += 0.012 + Math.random() * 0.033;
   }
 }
 
@@ -329,17 +350,17 @@ export function playTick() {
   }
 }
 
-/** One column more or less: a quick riffle of pages. */
-export function playFlip() {
+/** One column more or less: a soft shuffle of cards. */
+export function playShuffle() {
   if (!ctx || !noise) return;
   if (ctx.state !== "running") {
     if (navigator.userActivation?.hasBeenActive) void ctx.resume();
     return;
   }
   const now = performance.now();
-  if (now - lastFlip < FLIP_MIN_INTERVAL_MS) return;
-  lastFlip = now;
-  buildFlipSound(ctx, noise, ctx.currentTime, ctx.destination);
+  if (now - lastShuffle < SHUFFLE_MIN_INTERVAL_MS) return;
+  lastShuffle = now;
+  buildShuffleSound(ctx, noise, ctx.currentTime, ctx.destination);
 
   if ((coarsePointer ??= window.matchMedia("(pointer: coarse)").matches)) {
     navigator.vibrate?.(5);
@@ -368,12 +389,12 @@ if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
   // they actually produce — levels, spectrum, decay — without playing them.
   (window as unknown as Record<string, unknown>).__soundLab = {
     buildCardSound,
-    buildFlipSound,
+    buildShuffleSound,
     buildTick: buildBuffer,
     buildNoise,
     VOLUME,
     CARD_VOLUME,
-    FLIP_VOLUME,
+    SHUFFLE_VOLUME,
   };
 }
 
