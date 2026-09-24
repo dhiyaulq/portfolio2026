@@ -20,7 +20,7 @@ import {
   PILL_SPRING,
   PILL_STYLE,
 } from "@/components/glassDock";
-import { playTick } from "@/lib/tickSound";
+import { playRub } from "@/lib/tickSound";
 
 // ---------------------------------------------------------------------------
 // The showcase has three ways of looking at the work — a column grid, a 3D
@@ -396,9 +396,9 @@ function ColumnSlider({
   const set = (next: number) => {
     const n = clampCols(next);
     if (n === cols) return;
-    // Same click the carousel makes as a card passes the centre: the stops
-    // are detents, and they should sound like it.
-    playTick();
+    // One card sliding across another, as the grid opens or closes up. Drag
+    // through several stops quickly and the sounds overlap into one rub.
+    playRub();
     onChange(n);
   };
 
@@ -537,11 +537,18 @@ export default function LayoutSwitcher({
   mode,
   onChange,
   visible = true,
+  compact = false,
 }: {
   mode: Mode;
   onChange: (m: Mode) => void;
   /** Whether the showcase is on screen; the bars pop in and out with it. */
   visible?: boolean;
+  /**
+   * Phone-sized: the main bar on its own. A second bar would take most of the
+   * width and a slider wants a pointer, so each layout stays in the state its
+   * second bar opens on — one column, the Y axis.
+   */
+  compact?: boolean;
 }) {
   const family = familyOf(mode);
   // What each family was left on, so coming back to it returns you to the
@@ -555,9 +562,9 @@ export default function LayoutSwitcher({
     if (next === family) return;
     onChange(
       next === "column"
-        ? colMode(lastCols.current)
+        ? colMode(compact ? MIN_COLS : lastCols.current)
         : next === "3d"
-          ? axisMode(lastAxis.current)
+          ? axisMode(compact ? "y" : lastAxis.current)
           : "card"
     );
   };
@@ -571,11 +578,10 @@ export default function LayoutSwitcher({
       inert={!visible}
       aria-hidden={!visible}
     >
-      {/* Stacked on a phone (second bar on top), side by side once there's
-          room, and only on a wide screen does the main bar go to the middle
-          of the column with the second bar out at the edge — below that the
-          two would overlap. */}
-      <div className="relative flex flex-col-reverse items-center justify-center gap-2 lg:flex-row lg:gap-3 xl:block">
+      {/* Side by side as soon as there are two bars, and only on a wide
+          screen does the main bar go to the middle of the column with the
+          second bar out at the edge — below that the two would overlap. */}
+      <div className="relative flex items-center justify-center gap-3 xl:block">
         <div className="flex xl:justify-center">
           <AnimatePresence initial={false}>
             {visible && (
@@ -591,14 +597,14 @@ export default function LayoutSwitcher({
         </div>
         <div className="xl:absolute xl:inset-y-0 xl:right-10 xl:flex xl:items-center">
           <AnimatePresence initial={false}>
-            {visible && family === "column" && (
+            {visible && !compact && family === "column" && (
               <ColumnSlider
                 key="columns"
                 cols={colsOf(mode)}
                 onChange={(cols) => onChange(colMode(cols))}
               />
             )}
-            {visible && family === "3d" && (
+            {visible && !compact && family === "3d" && (
               <SegmentedBar
                 key="axis"
                 items={AXES}

@@ -161,6 +161,60 @@ export function buildCardSound(
   }
 }
 
+/**
+ * The column slider: one card rubbing across another as the grid changes.
+ *
+ * Nothing about this one is an impact, so it has no transient — it fades in
+ * over 30ms and back out over the rest, which is what makes a run of them
+ * (dragging quickly through the five stops) read as one continuous rub
+ * rather than a row of separate noises. The band sweeps downward as the
+ * movement runs out of speed, and the top is rolled off hard: paper slides,
+ * it doesn't hiss.
+ */
+const RUB_VOLUME = 0.075;
+const RUB_LENGTH = 0.15;
+// Short enough that the sounds overlap and blend into each other during a
+// fast drag, rather than one cutting the next off.
+const RUB_MIN_INTERVAL_MS = 30;
+let lastRub = 0;
+
+export function buildRubSound(
+  context: BaseAudioContext,
+  noiseBuffer: AudioBuffer,
+  at: number,
+  destination: AudioNode,
+  volume = RUB_VOLUME
+) {
+  // Each pass across the deck is a slightly different one.
+  const vary = 0.9 + Math.random() * 0.2;
+  const top = 2100 * vary;
+
+  const src = context.createBufferSource();
+  src.buffer = noiseBuffer;
+  const band = context.createBiquadFilter();
+  band.type = "bandpass";
+  // Broad: a narrow band would whistle, and the sound wants to be a texture
+  // rather than a pitch.
+  band.Q.value = 0.55;
+  band.frequency.setValueAtTime(top, at);
+  band.frequency.exponentialRampToValueAtTime(top * 0.55, at + RUB_LENGTH);
+
+  const air = context.createBiquadFilter();
+  air.type = "lowpass";
+  air.frequency.value = 6500;
+
+  const gain = context.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  // Both ends are curves, not corners: an exponential attack this slow has
+  // no click in it at all.
+  gain.gain.exponentialRampToValueAtTime(volume, at + 0.03);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + RUB_LENGTH);
+
+  src.connect(band).connect(air).connect(gain).connect(destination);
+  src.start(at, Math.random() * 0.3, RUB_LENGTH + 0.02);
+  src.stop(at + RUB_LENGTH + 0.02);
+}
+
 /** Create the audio context and unlock it on the first real user gesture. */
 export function primeTickSound() {
   if (typeof window === "undefined" || ctx) return () => {};
@@ -236,6 +290,23 @@ export function playTick() {
   }
 }
 
+/** One column more or less: a card rubbing across the one beneath it. */
+export function playRub() {
+  if (!ctx || !noise) return;
+  if (ctx.state !== "running") {
+    if (navigator.userActivation?.hasBeenActive) void ctx.resume();
+    return;
+  }
+  const now = performance.now();
+  if (now - lastRub < RUB_MIN_INTERVAL_MS) return;
+  lastRub = now;
+  buildRubSound(ctx, noise, ctx.currentTime, ctx.destination);
+
+  if ((coarsePointer ??= window.matchMedia("(pointer: coarse)").matches)) {
+    navigator.vibrate?.(5);
+  }
+}
+
 /** A card dealt off the deck, or gathered back onto it. */
 export function playCard(kind: CardSound) {
   if (!ctx || !noise) return;
@@ -258,10 +329,12 @@ if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
   // they actually produce — levels, spectrum, decay — without playing them.
   (window as unknown as Record<string, unknown>).__soundLab = {
     buildCardSound,
+    buildRubSound,
     buildTick: buildBuffer,
     buildNoise,
     VOLUME,
     CARD_VOLUME,
+    RUB_VOLUME,
   };
 }
 

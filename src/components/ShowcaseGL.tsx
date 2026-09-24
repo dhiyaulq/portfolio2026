@@ -107,22 +107,18 @@ const DEG = Math.PI / 180;
 type Viewport = { colW: number; colH: number; visH: number; wide: boolean };
 
 // The switcher sits this far from the bottom of the screen (Tailwind
-// bottom-8 / lg:bottom-10 in LayoutSwitcher). Each bar is 40px tall; on a
-// wide screen the two sit side by side, and on a phone they stack with 8px
-// between them. The stacked height is used for every narrow screen, because
-// the only layout without a second bar is the deck — which doesn't use this
-// clearance for anything.
+// bottom-8 / lg:bottom-10 in LayoutSwitcher) and is 40px tall. The second
+// bar sits beside the first, never under it, so this is the same height
+// whatever is showing.
 const SWITCHER_OFFSET = { wide: 40, narrow: 32 };
 const SWITCHER_H = 40;
-const SWITCHER_STACKED_H = 40 + 8 + 40;
 // Clear space between the last card and the switcher when a column ends.
 const END_CLEARANCE = 32;
 
 /** Spacing for the showcase column, desktop vs mobile. */
 function layoutOf(vp: Viewport) {
   const offset = vp.wide ? SWITCHER_OFFSET.wide : SWITCHER_OFFSET.narrow;
-  const bottom =
-    offset + (vp.wide ? SWITCHER_H : SWITCHER_STACKED_H) + END_CLEARANCE;
+  const bottom = offset + SWITCHER_H + END_CLEARANCE;
   return vp.wide
     ? { side: 24, top: 48, gap: 24, bottom, radius: 8 }
     : { side: 16, top: 24, gap: 12, bottom, radius: 4 };
@@ -216,6 +212,8 @@ type Target = {
   blur: number;
   /** Radians, world convention (+y up), so clockwise on screen is negative. */
   rot: number;
+  /** Corner radius in CSS pixels; the grid tightens it as it fills. */
+  radius: number;
 };
 
 /**
@@ -245,9 +243,22 @@ function stackScroll(mode: Mode, vp: Viewport) {
   return vp.colH * (mode === "card" ? 1.25 : 0.6);
 }
 
+/**
+ * The grid closes up as it fills: every column added takes a quarter off both
+ * the gap between cards and the radius of their corners. One column is the
+ * design's own 24px and 8px; by five the cards are nearly square-cornered and
+ * almost touching, which is what keeps a dense grid reading as one block of
+ * work rather than as twenty separate cards.
+ */
+function gridOf(mode: Mode, vp: Viewport) {
+  const L = layoutOf(vp);
+  const k = Math.pow(0.75, colsOf(mode) - 1);
+  return { ...L, gap: L.gap * k, radius: L.radius * k };
+}
+
 /** Card width/height for the grid layouts. */
 function flowCardSize(mode: Mode, vp: Viewport) {
-  const { side, gap } = layoutOf(vp);
+  const { side, gap } = gridOf(mode, vp);
   const cols = colsOf(mode);
   const usable = Math.max(vp.colW - side * 2, 240);
   const total = Math.min(COL_TOTAL[cols - 1], usable);
@@ -268,7 +279,7 @@ function contentHeight(mode: Mode, count: number, vp: Viewport) {
     // visible one, so the last card lands exactly at the end.
     return Math.max(count - 1, 1) * stackScroll(mode, vp) + vp.visH;
   }
-  const { top, gap, bottom } = layoutOf(vp);
+  const { top, gap, bottom } = gridOf(mode, vp);
   const { h } = flowCardSize(mode, vp);
   const rows = rowsOf(mode, count);
   // Never shorter than one screen. On mobile the showcase sits below the
@@ -290,7 +301,7 @@ function focusIndex(mode: Mode, count: number, local: number, vp: Viewport) {
     const range = Math.max(contentHeight(mode, count, vp) - vp.visH, 1);
     return Math.min(Math.max(local / range, 0), 1) * last;
   }
-  const { top, gap } = layoutOf(vp);
+  const { top, gap } = gridOf(mode, vp);
   const { h } = flowCardSize(mode, vp);
   const rows = rowsOf(mode, count);
   // Card centre sits at top + i*pitch + h/2 in section space; it's centred
@@ -357,6 +368,7 @@ function targetFor(
         opacity: index < leaving ? 0 : 1,
         blur: 0,
         rot: -lerpTable(OUT_T, OUT_ROT, out) * DEG,
+        radius: L.radius,
       };
     }
 
@@ -373,6 +385,7 @@ function targetFor(
       opacity: lerpTable(STACK_D, STACK_FADE, depth),
       blur: lerpTable(STACK_D, STACK_BLUR, depth),
       rot: 0,
+      radius: L.radius,
     };
   }
 
@@ -405,25 +418,28 @@ function targetFor(
       opacity: lerpTable(DIST, FADE, ad),
       blur: lerpTable(DIST, BLUR, ad),
       rot: 0,
+      radius: L.radius,
     };
   }
 
+  const grid = gridOf(mode, vp);
   const { w, h } = flowCardSize(mode, vp);
   const cols = colsOf(mode);
-  const pitch = h + L.gap;
+  const pitch = h + grid.gap;
   const col = index % cols;
   const row = Math.floor(index / cols);
-  const screenTop = L.top + row * pitch - local;
+  const screenTop = grid.top + row * pitch - local;
   return {
     // Centred on the column: the middle of the grid is the middle of the
     // block, whether that's one card or five.
-    x: (col - (cols - 1) / 2) * (w + L.gap),
+    x: (col - (cols - 1) / 2) * (w + grid.gap),
     y: vp.colH / 2 - (screenTop + h / 2),
     w,
     h,
     opacity: 1,
     blur: 0,
     rot: 0,
+    radius: grid.radius,
   };
 }
 
@@ -730,9 +746,6 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       camera.top = viewport.colH / 2;
       camera.bottom = -viewport.colH / 2;
       camera.updateProjectionMatrix();
-      // Corners are 8px on desktop, 4px in the mobile design.
-      const { radius } = layoutOf(viewport);
-      planes.forEach((p) => (p.material.uniforms.uRadius.value = radius));
       setWideLayout(wide);
       // The nested-scroll check walks every element under the pointer with
       // getComputedStyle. Only the desktop sidebar can scroll on its own, so
@@ -955,6 +968,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         c.opacity += (t.opacity - c.opacity) * k;
         c.blur += (t.blur - c.blur) * k;
         c.rot += (t.rot - c.rot) * k;
+        // Eased like everything else, so the corners tighten as the grid
+        // closes up rather than snapping to the new radius.
+        c.radius += (t.radius - c.radius) * k;
         p.current = c;
 
         // Land the quad on whole device pixels. Without this a card rests at
@@ -977,6 +993,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         p.mesh.renderOrder = m === "card" ? count - i : Math.round(c.w);
         p.material.uniforms.uOpacity.value = c.opacity;
         p.material.uniforms.uBlur.value = c.blur;
+        p.material.uniforms.uRadius.value = c.radius;
         p.material.uniforms.uSize.value.set(sw, sh);
       });
 
@@ -1060,7 +1077,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const range = Math.max(contentHeight(m, count, vp) - vp.visH, 1);
       return Math.round(Math.min(local / range, 1) * lastIndex);
     }
-    const { top, gap } = layoutOf(vp);
+    const { top, gap } = gridOf(m, vp);
     const { h } = flowCardSize(m, vp);
     const row = Math.round(Math.max(local - top + 1, 0) / (h + gap));
     return Math.min(row * colsOf(m), lastIndex);
@@ -1074,7 +1091,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const progress = lastIndex > 0 ? anchor / lastIndex : 0;
       return Math.min(progress * max, max);
     }
-    const { gap } = layoutOf(vp);
+    const { gap } = gridOf(m, vp);
     const { h } = flowCardSize(m, vp);
     const row = Math.floor(anchor / colsOf(m));
     return Math.min(Math.max(row * (h + gap), 0), max);
@@ -1115,6 +1132,18 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, count]);
 
+  // A phone has no second bar, so there's nothing there to put a layout back
+  // to its first state: if the window narrows while the grid is on four
+  // columns or the carousel is on a diagonal, return it to the state that bar
+  // opens on rather than stranding it somewhere unreachable.
+  useEffect(() => {
+    if (wideLayout) return;
+    const first: Mode =
+      familyOf(mode) === "column" ? "col-1" : familyOf(mode) === "3d" ? "3d-y" : "card";
+    if (first !== mode) handleModeChange(first);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wideLayout, mode]);
+
   // Lenis caches the page height and only refreshes it from a debounced
   // ResizeObserver, so right after load (spacer still 0px) or a height change
   // it can believe there's nothing to scroll and swallow wheel/touch input.
@@ -1148,6 +1177,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           mode={mode}
           onChange={handleModeChange}
           visible={switcherVisible}
+          compact={!wideLayout}
         />
       )}
     </div>
