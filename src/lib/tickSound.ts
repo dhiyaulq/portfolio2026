@@ -142,8 +142,11 @@ export function buildCardSound(
   band.type = "bandpass";
   band.Q.value = deal ? 0.8 : 0.9;
   const gain = context.createGain();
-  // See buildSettleSound: silent before the first scheduled event, or one
-  // sample of raw noise escapes at the node's default gain of 1.
+  // Silent before the first scheduled event, not just from `at` onwards: a
+  // gain node defaults to 1, and a source starting at exactly the moment of
+  // its first setValueAtTime can get one sample through at that default —
+  // one sample of raw noise, which is a click far louder than the sound it
+  // belongs to.
   gain.gain.value = 0.0001;
 
   if (deal) {
@@ -202,56 +205,6 @@ export function buildCardSound(
   body.connect(bodyGain).connect(destination);
   body.start(at);
   body.stop(at + 0.05);
-}
-
-/**
- * A card landing in its new place during a layout change.
- *
- * This is the deck's own draw sound, not a synthesis of its own. Three
- * attempts at a purpose-built landing sound were each rejected — a rub, a
- * riffle, a rustle built to match a reference recording's spectrum — and the
- * last one measured close to the reference and still didn't sound like
- * cards, because a spectrum match is not a timbre match. The deck's sound
- * already reads as a card to the person listening, which is the only test
- * that counts, so a layout change is now a dozen of those rather than a
- * dozen of something else.
- *
- * Quieter than the deck plays it, because the deck plays one at a time and
- * this plays up to fourteen.
- */
-const SETTLE_VOLUME = CARD_VOLUME * 0.6;
-
-/**
- * How much of the level a card takes when others are landing with it.
- *
- * Uncorrelated sounds add as the square root of their number, so without
- * this a full grid would arrive several times louder than a single card.
- * The falloff is gentler than a strict 1/sqrt(n) — cards that land late in
- * a shuffle are quieter than the first, but they are still cards.
- */
-function settleShare(voice: number) {
-  return 1 / Math.sqrt(1 + voice * 0.35);
-}
-
-/**
- * A card arriving in its new place. No rate limit: several landing together
- * is the point, and the showcase caps how many it asks for. `voice` is how
- * many have already landed in this layout change.
- */
-export function playSettle(voice = 0) {
-  if (!ctx || !noise) return;
-  if (ctx.state !== "running") {
-    if (navigator.userActivation?.hasBeenActive) void ctx.resume();
-    return;
-  }
-  buildCardSound(
-    ctx,
-    noise,
-    "deal",
-    ctx.currentTime,
-    ctx.destination,
-    SETTLE_VOLUME * settleShare(voice)
-  );
 }
 
 /** Create the audio context and unlock it on the first real user gesture. */
@@ -351,12 +304,10 @@ if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
   // they actually produce — levels, spectrum, decay — without playing them.
   (window as unknown as Record<string, unknown>).__soundLab = {
     buildCardSound,
-    settleShare,
     buildTick: buildBuffer,
     buildNoise,
     VOLUME,
     CARD_VOLUME,
-    SETTLE_VOLUME,
   };
 }
 
