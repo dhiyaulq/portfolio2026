@@ -38,7 +38,10 @@ export default function SendEmailButton({ email }: { email: string }) {
       }}
       transition={{ duration: 0.15, ease: "easeOut" }}
       style={{ backgroundImage: FILL_IDLE }}
-      className="relative flex items-center gap-1.5 overflow-hidden rounded-full py-1.5 pl-3 pr-2"
+      // 8 left / 12 right (Figma 223:4934): the mark sits tighter to the
+      // edge than the label does, which is what keeps the two sides looking
+      // even once the icon's own padding is counted.
+      className="relative flex items-center gap-1.5 overflow-hidden rounded-full py-1.5 pl-2 pr-3"
     >
       <motion.span
         aria-hidden
@@ -59,9 +62,10 @@ export default function SendEmailButton({ email }: { email: string }) {
         className="pointer-events-none absolute inset-0 rounded-full"
         style={{ boxShadow: "inset 0 0 0 1px #1389e3" }}
       />
-      <span className="relative text-sm font-semibold leading-[22px] text-white">Send Email</span>
+      {/* famicons:mail (223:5126), white, ahead of the label. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/icons/cta-arrow-right.svg" alt="" className="relative h-3 w-3" />
+      <img src="/icons/mail.svg" alt="" className="relative h-4 w-4" />
+      <span className="relative text-sm font-semibold leading-[22px] text-white">Send Email</span>
     </motion.a>
   );
 }

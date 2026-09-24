@@ -46,7 +46,12 @@ export const siteConfig = {
   name: "Dhiya",
   bio: "I’m Dhiya, a designer based in Indonesia, partnering with forward-thinking teams to create thoughtful interfaces, websites, and brand identities designed for lasting growth.",
   email: "dhiyaulhaqmahmud@gmail.com",
-  chatUrl: "https://t.me/dsignspace",
+  // The two ways to start a chat, offered by the menu under "Chat Now".
+  // wa.me takes the number in international form with no + or spaces.
+  chats: [
+    { id: "whatsapp", label: "Whatsapp", href: "https://wa.me/6282113707930" },
+    { id: "telegram", label: "Telegram", href: "https://t.me/dsignspace" },
+  ] as const,
   copyright: "© 2026",
   // Bottom right of the sidebar (Figma 192:2321).
   socials: [

@@ -44,7 +44,7 @@ export default function Sidebar() {
 
           <div className="flex flex-wrap gap-4">
             <SendEmailButton email={siteConfig.email} />
-            <ChatNowButton href={siteConfig.chatUrl} />
+            <ChatNowButton options={siteConfig.chats} />
           </div>
         </div>
 
