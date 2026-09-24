@@ -44,6 +44,12 @@ const CARD_3D_W = 700;
 // the column that's actually there, so on a phone they all just fill it.
 const COL_TOTAL = [800, 900, 1000, 1080, 1160];
 
+// The grid closes up as it fills: the gap between cards and the radius of
+// their corners, per column count. Desktop numbers — a phone is always one
+// column, and takes the mobile spacing it always had.
+const COL_GAP = [24, 20, 16, 14, 12];
+const COL_RADIUS = [8, 6, 5, 4, 3];
+
 const OFFSET_D = [-3, -2, -1, 0, 1, 2, 3];
 const OFFSET_Y = [-338, -260, -135, 0, 135, 260, 338];
 const OFFSET_X = [-400, -305, -155, 0, 155, 305, 400];
@@ -244,16 +250,20 @@ function stackScroll(mode: Mode, vp: Viewport) {
 }
 
 /**
- * The grid closes up as it fills: every column added takes a quarter off both
- * the gap between cards and the radius of their corners. One column is the
- * design's own 24px and 8px; by five the cards are nearly square-cornered and
- * almost touching, which is what keeps a dense grid reading as one block of
- * work rather than as twenty separate cards.
+ * Spacing for the grid at this column count. One column is the design's own
+ * 24px gap and 8px corners; every column added pulls both in, so a dense
+ * grid reads as one block of work rather than as twenty separate cards.
+ * Taken as a proportion of the base values, so the mobile layout keeps its
+ * own smaller spacing.
  */
 function gridOf(mode: Mode, vp: Viewport) {
   const L = layoutOf(vp);
-  const k = Math.pow(0.75, colsOf(mode) - 1);
-  return { ...L, gap: L.gap * k, radius: L.radius * k };
+  const i = colsOf(mode) - 1;
+  return {
+    ...L,
+    gap: COL_GAP[i] * (L.gap / COL_GAP[0]),
+    radius: COL_RADIUS[i] * (L.radius / COL_RADIUS[0]),
+  };
 }
 
 /** Card width/height for the grid layouts. */
