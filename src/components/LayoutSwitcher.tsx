@@ -20,7 +20,7 @@ import {
   PILL_SPRING,
   PILL_STYLE,
 } from "@/components/glassDock";
-import { playRub } from "@/lib/tickSound";
+import { playFlip } from "@/lib/tickSound";
 
 // ---------------------------------------------------------------------------
 // The showcase has three ways of looking at the work — a column grid, a 3D
@@ -396,9 +396,9 @@ function ColumnSlider({
   const set = (next: number) => {
     const n = clampCols(next);
     if (n === cols) return;
-    // One card sliding across another, as the grid opens or closes up. Drag
-    // through several stops quickly and the sounds overlap into one rub.
-    playRub();
+    // A quick riffle of pages as the grid opens or closes up. Drag through
+    // several stops and the bursts run into each other and keep shuffling.
+    playFlip();
     onChange(n);
   };
 

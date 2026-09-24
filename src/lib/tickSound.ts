@@ -91,13 +91,23 @@ function buildNoise(context: BaseAudioContext) {
  * Wire up one card sound. Exported so a test can render it through an
  * OfflineAudioContext and measure what it actually produces.
  *
- * Deal: a card skating off the top of the deck — a band of noise sweeping
- * downward as it leaves, with a moment of high edge at the start where the
- * corner lets go.
+ * Deal is a card being *drawn*, and a draw has its accent at the end rather
+ * than the start: the card slides, the friction brightening as it picks up
+ * speed, and then its edge clears the deck and lets go with a short bright
+ * snap. (This used to be built the other way round, loudest where the card
+ * started moving, which is what a card thrown down sounds like, not one
+ * pulled off the top.) After the release there's a breath of the card still
+ * travelling, and nothing below the voice: paper has no bottom end.
  *
- * Gather: it lands. Shorter and lower, with a soft thump underneath for the
- * body of the deck it lands on.
+ * Gather: it lands. Shorter, darker, falling rather than rising, with a soft
+ * thump underneath for the body of the deck it lands on.
  */
+// When the card's edge clears the deck, as a fraction of a second after the
+// sound starts. Kept short deliberately: the ear hears the snap as the moment
+// the sound happened, and that moment has to land on the card leaving the
+// screen, not 100ms behind it.
+const DRAW_RELEASE = 0.042;
+
 export function buildCardSound(
   context: BaseAudioContext,
   noiseBuffer: AudioBuffer,
@@ -110,109 +120,138 @@ export function buildCardSound(
   // Each card sounds slightly different, as each one would.
   const vary = 0.92 + Math.random() * 0.16;
 
+  // Paper doesn't hiss: roll off the top so the noise reads as a card rather
+  // than as static. Everything in this sound goes through it.
+  const air = context.createBiquadFilter();
+  air.type = "lowpass";
+  air.frequency.value = deal ? 8000 : 9000;
+  air.connect(destination);
+
   const src = context.createBufferSource();
   src.buffer = noiseBuffer;
   const band = context.createBiquadFilter();
   band.type = "bandpass";
-  band.Q.value = deal ? 1 : 0.9;
-  const top = (deal ? 3200 : 2600) * vary;
-  const sweep = deal ? 0.45 : 0.5;
-  const length = deal ? 0.085 : 0.05;
-  band.frequency.setValueAtTime(top, at);
-  band.frequency.exponentialRampToValueAtTime(top * sweep, at + length);
-
-  // Paper doesn't hiss: roll off the top so the noise reads as a card rather
-  // than as static.
-  const air = context.createBiquadFilter();
-  air.type = "lowpass";
-  air.frequency.value = 9000;
-
+  band.Q.value = deal ? 0.8 : 0.9;
   const gain = context.createGain();
+
+  if (deal) {
+    // The slide: the band opens upward as the card speeds up, and the level
+    // rises with it, so the whole thing leans into the release.
+    const from = 1100 * vary;
+    band.frequency.setValueAtTime(from, at);
+    band.frequency.exponentialRampToValueAtTime(from * 2.6, at + DRAW_RELEASE);
+    band.frequency.exponentialRampToValueAtTime(from * 1.5, at + 0.13);
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(volume * 0.62, at + DRAW_RELEASE);
+    // The tail is the card still moving, well under the snap.
+    gain.gain.exponentialRampToValueAtTime(volume * 0.14, at + DRAW_RELEASE + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.14);
+    src.connect(band).connect(gain).connect(air);
+    src.start(at, Math.random() * 0.3, 0.16);
+
+    // The edge letting go. Short, bright and the loudest thing here — this
+    // is the part the ear reads as "a card".
+    const snap = context.createBufferSource();
+    snap.buffer = noiseBuffer;
+    const high = context.createBiquadFilter();
+    high.type = "highpass";
+    high.frequency.value = 3800;
+    const snapGain = context.createGain();
+    snapGain.gain.setValueAtTime(0.0001, at + DRAW_RELEASE - 0.004);
+    // Half the nominal level: high noise is spiky, and at full gain the
+    // release peaked three times as high as the tick for the same loudness.
+    snapGain.gain.exponentialRampToValueAtTime(volume * 0.5, at + DRAW_RELEASE);
+    snapGain.gain.exponentialRampToValueAtTime(0.0001, at + DRAW_RELEASE + 0.035);
+    snap.connect(high).connect(snapGain).connect(air);
+    snap.start(at + DRAW_RELEASE - 0.004, Math.random() * 0.3, 0.05);
+    return;
+  }
+
+  const top = 2600 * vary;
+  const length = 0.05;
+  band.frequency.setValueAtTime(top, at);
+  band.frequency.exponentialRampToValueAtTime(top * 0.5, at + length);
   gain.gain.setValueAtTime(0, at);
-  gain.gain.linearRampToValueAtTime(volume, at + (deal ? 0.004 : 0.0015));
+  gain.gain.linearRampToValueAtTime(volume, at + 0.0015);
   gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
-  src.connect(band).connect(air).connect(gain).connect(destination);
+  src.connect(band).connect(gain).connect(air);
   // Start somewhere random in the noise so repeats aren't the same sample.
   src.start(at, Math.random() * 0.4, length + 0.02);
 
-  if (deal) {
-    // The corner letting go: a sliver of high noise at the very start.
-    const edge = context.createBufferSource();
-    edge.buffer = noiseBuffer;
-    const high = context.createBiquadFilter();
-    high.type = "highpass";
-    high.frequency.value = 4200;
-    const edgeGain = context.createGain();
-    edgeGain.gain.setValueAtTime(volume * 0.3, at);
-    edgeGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.012);
-    edge.connect(high).connect(edgeGain).connect(destination);
-    edge.start(at, Math.random() * 0.4, 0.02);
-  } else {
-    // The deck itself, struck: a short low thump under the landing.
-    const body = context.createOscillator();
-    body.frequency.value = 170 * vary;
-    const bodyGain = context.createGain();
-    bodyGain.gain.setValueAtTime(0, at);
-    bodyGain.gain.linearRampToValueAtTime(volume * 0.09, at + 0.003);
-    bodyGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.025);
-    body.connect(bodyGain).connect(destination);
-    body.start(at);
-    body.stop(at + 0.05);
-  }
+  // The deck itself, struck: a short low thump under the landing.
+  const body = context.createOscillator();
+  body.frequency.value = 170 * vary;
+  const bodyGain = context.createGain();
+  bodyGain.gain.setValueAtTime(0, at);
+  bodyGain.gain.linearRampToValueAtTime(volume * 0.09, at + 0.003);
+  bodyGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.025);
+  body.connect(bodyGain).connect(destination);
+  body.start(at);
+  body.stop(at + 0.05);
 }
 
 /**
- * The column slider: one card rubbing across another as the grid changes.
+ * The column slider: pages riffling past a thumb — a fast paper shuffle.
  *
- * Nothing about this one is an impact, so it has no transient — it fades in
- * over 30ms and back out over the rest, which is what makes a run of them
- * (dragging quickly through the five stops) read as one continuous rub
- * rather than a row of separate noises. The band sweeps downward as the
- * movement runs out of speed, and the top is rolled off hard: paper slides,
- * it doesn't hiss.
+ * Not one sound but a burst of four to six, 14-26ms apart, each a sliver of
+ * filtered noise with a hard decay: that spacing is the whole effect, because
+ * the ear stops counting individual edges somewhere around 30ms apart and
+ * hears a flutter instead. The band climbs slightly through the burst and the
+ * taps get quieter, so the run reads as a flick that's running out rather
+ * than a loop. Drag through several stops and the bursts land on each other
+ * and it simply keeps riffling.
+ *
+ * (The first version of this was one smooth 150ms rub, which was the right
+ * material but the wrong gesture — a single slow slide, where this is the
+ * fast shuffle it should have been.)
  */
-const RUB_VOLUME = 0.075;
-const RUB_LENGTH = 0.15;
-// Short enough that the sounds overlap and blend into each other during a
-// fast drag, rather than one cutting the next off.
-const RUB_MIN_INTERVAL_MS = 30;
-let lastRub = 0;
+const FLIP_VOLUME = 0.22;
+const FLIP_TAP = 0.013;
+// A burst is ~90ms, so this lets two overlap but not five.
+const FLIP_MIN_INTERVAL_MS = 55;
+let lastFlip = 0;
 
-export function buildRubSound(
+export function buildFlipSound(
   context: BaseAudioContext,
   noiseBuffer: AudioBuffer,
   at: number,
   destination: AudioNode,
-  volume = RUB_VOLUME
+  volume = FLIP_VOLUME
 ) {
-  // Each pass across the deck is a slightly different one.
+  // Every riffle is a different one: a few more or fewer pages, a slightly
+  // different thickness to them.
+  const taps = 4 + Math.floor(Math.random() * 3);
   const vary = 0.9 + Math.random() * 0.2;
-  const top = 2100 * vary;
 
-  const src = context.createBufferSource();
-  src.buffer = noiseBuffer;
-  const band = context.createBiquadFilter();
-  band.type = "bandpass";
-  // Broad: a narrow band would whistle, and the sound wants to be a texture
-  // rather than a pitch.
-  band.Q.value = 0.55;
-  band.frequency.setValueAtTime(top, at);
-  band.frequency.exponentialRampToValueAtTime(top * 0.55, at + RUB_LENGTH);
-
+  // One roll-off for the whole burst: paper, not static.
   const air = context.createBiquadFilter();
   air.type = "lowpass";
-  air.frequency.value = 6500;
+  air.frequency.value = 7500;
+  air.connect(destination);
 
-  const gain = context.createGain();
-  gain.gain.setValueAtTime(0.0001, at);
-  // Both ends are curves, not corners: an exponential attack this slow has
-  // no click in it at all.
-  gain.gain.exponentialRampToValueAtTime(volume, at + 0.03);
-  gain.gain.exponentialRampToValueAtTime(0.0001, at + RUB_LENGTH);
+  let t = at;
+  for (let i = 0; i < taps; i++) {
+    const src = context.createBufferSource();
+    src.buffer = noiseBuffer;
+    const band = context.createBiquadFilter();
+    band.type = "bandpass";
+    // Tight enough to be an edge rather than a hiss, broad enough not to ring.
+    band.Q.value = 1.3;
+    band.frequency.value = (1900 + i * 260) * vary;
 
-  src.connect(band).connect(air).connect(gain).connect(destination);
-  src.start(at, Math.random() * 0.3, RUB_LENGTH + 0.02);
-  src.stop(at + RUB_LENGTH + 0.02);
+    const gain = context.createGain();
+    // Each tap fades up over 2ms rather than starting flat: that's the
+    // difference between paper and a row of clicks.
+    const level = volume * (1 - (i / taps) * 0.5);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(level, t + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + FLIP_TAP);
+
+    src.connect(band).connect(gain).connect(air);
+    src.start(t, Math.random() * 0.3, FLIP_TAP + 0.01);
+    src.stop(t + FLIP_TAP + 0.01);
+    t += 0.014 + Math.random() * 0.012;
+  }
 }
 
 /** Create the audio context and unlock it on the first real user gesture. */
@@ -290,17 +329,17 @@ export function playTick() {
   }
 }
 
-/** One column more or less: a card rubbing across the one beneath it. */
-export function playRub() {
+/** One column more or less: a quick riffle of pages. */
+export function playFlip() {
   if (!ctx || !noise) return;
   if (ctx.state !== "running") {
     if (navigator.userActivation?.hasBeenActive) void ctx.resume();
     return;
   }
   const now = performance.now();
-  if (now - lastRub < RUB_MIN_INTERVAL_MS) return;
-  lastRub = now;
-  buildRubSound(ctx, noise, ctx.currentTime, ctx.destination);
+  if (now - lastFlip < FLIP_MIN_INTERVAL_MS) return;
+  lastFlip = now;
+  buildFlipSound(ctx, noise, ctx.currentTime, ctx.destination);
 
   if ((coarsePointer ??= window.matchMedia("(pointer: coarse)").matches)) {
     navigator.vibrate?.(5);
@@ -329,12 +368,12 @@ if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
   // they actually produce — levels, spectrum, decay — without playing them.
   (window as unknown as Record<string, unknown>).__soundLab = {
     buildCardSound,
-    buildRubSound,
+    buildFlipSound,
     buildTick: buildBuffer,
     buildNoise,
     VOLUME,
     CARD_VOLUME,
-    RUB_VOLUME,
+    FLIP_VOLUME,
   };
 }
 
