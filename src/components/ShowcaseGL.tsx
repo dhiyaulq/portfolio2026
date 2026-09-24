@@ -6,14 +6,19 @@ import Lenis from "lenis";
 import { urlFor } from "@/lib/sanity";
 import { playCard, playTick, primeTickSound, tickSoundState } from "@/lib/tickSound";
 import type { MediaItem, WorkListItem } from "@/lib/queries";
-import LayoutSwitcher, { type Mode } from "@/components/LayoutSwitcher";
+import LayoutSwitcher, {
+  axisOf,
+  colsOf,
+  familyOf,
+  type Mode,
+} from "@/components/LayoutSwitcher";
 
 // ---------------------------------------------------------------------------
 // Geometry. Desktop values come straight off the Figma "corousel state"
 // frames (990px column); mobile off Figma 155:510 (402px screen).
-//   1-col  800px wide cards
-//   2-col  900px total, two cards side by side
-//   3D     one 700px card centred, neighbours at 500 / 300 / 200
+//   1 column   800px wide cards
+//   2 columns  900px total, two cards side by side
+//   3D         one 700px card centred, neighbours at 500 / 300 / 200
 // Every card is 4:3. All numbers below are CSS pixels; the orthographic camera
 // is set up 1 unit = 1 px so the scene matches the spec exactly.
 // ---------------------------------------------------------------------------
@@ -30,8 +35,14 @@ const EDGE_W = 1;
 const EDGE_PAD = EDGE_W + 1;
 
 const ONE_COL_W = 800;
-const TWO_COL_W = 900;
 const CARD_3D_W = 700;
+
+// How wide the grid is in total, per column count. One and two columns are
+// the design's own numbers; past that the block keeps growing but slowly, so
+// five columns stay a block of work in the middle of the page rather than a
+// band stretched across an ultrawide monitor. Every one of them is capped to
+// the column that's actually there, so on a phone they all just fill it.
+const COL_TOTAL = [800, 900, 1000, 1080, 1160];
 
 const OFFSET_D = [-3, -2, -1, 0, 1, 2, 3];
 const OFFSET_Y = [-338, -260, -135, 0, 135, 260, 338];
@@ -96,16 +107,22 @@ const DEG = Math.PI / 180;
 type Viewport = { colW: number; colH: number; visH: number; wide: boolean };
 
 // The switcher sits this far from the bottom of the screen (Tailwind
-// bottom-8 / lg:bottom-12 in LayoutSwitcher) and is 40px tall.
-const SWITCHER_OFFSET = { wide: 48, narrow: 32 };
+// bottom-8 / lg:bottom-10 in LayoutSwitcher). Each bar is 40px tall; on a
+// wide screen the two sit side by side, and on a phone they stack with 8px
+// between them. The stacked height is used for every narrow screen, because
+// the only layout without a second bar is the deck — which doesn't use this
+// clearance for anything.
+const SWITCHER_OFFSET = { wide: 40, narrow: 32 };
 const SWITCHER_H = 40;
+const SWITCHER_STACKED_H = 40 + 8 + 40;
 // Clear space between the last card and the switcher when a column ends.
 const END_CLEARANCE = 32;
 
 /** Spacing for the showcase column, desktop vs mobile. */
 function layoutOf(vp: Viewport) {
   const offset = vp.wide ? SWITCHER_OFFSET.wide : SWITCHER_OFFSET.narrow;
-  const bottom = offset + SWITCHER_H + END_CLEARANCE;
+  const bottom =
+    offset + (vp.wide ? SWITCHER_H : SWITCHER_STACKED_H) + END_CLEARANCE;
   return vp.wide
     ? { side: 24, top: 48, gap: 24, bottom, radius: 8 }
     : { side: 16, top: 24, gap: 12, bottom, radius: 4 };
@@ -207,7 +224,15 @@ type Target = {
  * per 0.6 screens — and so their scroll height, focus and anchoring.
  */
 function isStack(mode: Mode) {
-  return mode === "3d-1" || mode === "3d-2" || mode === "card";
+  return familyOf(mode) !== "column";
+}
+
+/**
+ * Any layout that lays its cards out sideways should answer a horizontal
+ * trackpad swipe as well as a vertical one.
+ */
+function gestureFor(mode: Mode) {
+  return familyOf(mode) === "3d" && axisOf(mode) !== "y" ? "both" : "vertical";
 }
 
 /**
@@ -220,16 +245,19 @@ function stackScroll(mode: Mode, vp: Viewport) {
   return vp.colH * (mode === "card" ? 1.25 : 0.6);
 }
 
-/** Card width/height for the flow layouts. */
+/** Card width/height for the grid layouts. */
 function flowCardSize(mode: Mode, vp: Viewport) {
   const { side, gap } = layoutOf(vp);
+  const cols = colsOf(mode);
   const usable = Math.max(vp.colW - side * 2, 240);
-  if (mode === "2-col") {
-    const w = (Math.min(TWO_COL_W, usable) - gap) / 2;
-    return { w, h: w * RATIO };
-  }
-  const w = Math.min(ONE_COL_W, usable);
+  const total = Math.min(COL_TOTAL[cols - 1], usable);
+  const w = (total - gap * (cols - 1)) / cols;
   return { w, h: w * RATIO };
+}
+
+/** Rows the grid needs for `count` cards. */
+function rowsOf(mode: Mode, count: number) {
+  return Math.ceil(count / colsOf(mode));
 }
 
 /** Scrollable height of the showcase for a mode; real page scroll drives it. */
@@ -242,7 +270,7 @@ function contentHeight(mode: Mode, count: number, vp: Viewport) {
   }
   const { top, gap, bottom } = layoutOf(vp);
   const { h } = flowCardSize(mode, vp);
-  const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
+  const rows = rowsOf(mode, count);
   // Never shorter than one screen. On mobile the showcase sits below the
   // hero, and if its content is shorter than the viewport (2-col on a phone)
   // the page can't scroll far enough for the section to reach the top — the
@@ -264,7 +292,7 @@ function focusIndex(mode: Mode, count: number, local: number, vp: Viewport) {
   }
   const { top, gap } = layoutOf(vp);
   const { h } = flowCardSize(mode, vp);
-  const rows = mode === "2-col" ? Math.ceil(count / 2) : count;
+  const rows = rowsOf(mode, count);
   // Card centre sits at top + i*pitch + h/2 in section space; it's centred
   // when that equals the scroll offset + half the viewport.
   const f = (local + vp.visH / 2 - top - h / 2) / (h + gap);
@@ -348,22 +376,30 @@ function targetFor(
     };
   }
 
-  if (mode === "3d-1" || mode === "3d-2") {
+  if (familyOf(mode) === "3d") {
     const range = Math.max(contentHeight(mode, count, vp) - vp.visH, 1);
     const progress = Math.min(Math.max(local / range, 0), 1);
     // The 3D stage behaves like a sticky, screen-tall panel: it scrolls up
     // with the page until the section reaches the top, then stays pinned.
     const stageShift = Math.min(local, 0);
     const active = progress * Math.max(count - 1, 0);
+    const axis = axisOf(mode);
     const d = index - active;
     const ad = Math.abs(d);
     const fit = fit3D(vp);
     const scale = lerpTable(DIST, SCALE, ad);
     const w = CARD_3D_W * scale * fit;
+    // Which way the line of cards runs. Y goes up the screen and X across it;
+    // the two Z axes run along a diagonal — the same offsets on both at once,
+    // so a neighbour peeks out from behind the corner of the card in front by
+    // as much as it peeks out from under its edge in Y. They are mirror
+    // images of each other, as their marks in the switcher are.
+    const alongX = axis === "y" ? 0 : axis === "z1" ? -1 : 1;
+    const alongY = axis === "x" ? 0 : 1;
     return {
-      x: mode === "3d-2" ? lerpTable(OFFSET_D, OFFSET_X, d) * fit : 0,
+      x: alongX * lerpTable(OFFSET_D, OFFSET_X, d) * fit,
       // Figma offsets are measured downward; world +y is up.
-      y: (mode === "3d-1" ? -lerpTable(OFFSET_D, OFFSET_Y, d) * fit : 0) + stageShift,
+      y: -alongY * lerpTable(OFFSET_D, OFFSET_Y, d) * fit + stageShift,
       w,
       h: w * RATIO,
       opacity: lerpTable(DIST, FADE, ad),
@@ -373,12 +409,15 @@ function targetFor(
   }
 
   const { w, h } = flowCardSize(mode, vp);
+  const cols = colsOf(mode);
   const pitch = h + L.gap;
-  const col = mode === "2-col" ? index % 2 : 0;
-  const row = mode === "2-col" ? Math.floor(index / 2) : index;
+  const col = index % cols;
+  const row = Math.floor(index / cols);
   const screenTop = L.top + row * pitch - local;
   return {
-    x: mode === "2-col" ? (col - 0.5) * (w + L.gap) : 0,
+    // Centred on the column: the middle of the grid is the middle of the
+    // block, whether that's one card or five.
+    x: (col - (cols - 1) / 2) * (w + L.gap),
     y: vp.colH / 2 - (screenTop + h / 2),
     w,
     h,
@@ -501,7 +540,7 @@ const FRAG = `
 `;
 
 export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
-  const [mode, setMode] = useState<Mode>("1-col");
+  const [mode, setMode] = useState<Mode>("col-1");
   const mountRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef<Mode>(mode);
   const anchorRef = useRef(0);
@@ -518,8 +557,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   // The switcher only shows once the showcase has scrolled to the top — on
   // desktop that's always; on mobile it waits until you're past the hero.
   const [switcherVisible, setSwitcherVisible] = useState(false);
-  // Desktop (sidebar column) vs mobile (hero above). 3D-2 is desktop-only:
-  // on a phone a sideways swipe can't drive it.
+  // Desktop (sidebar column) vs mobile (hero above): on a phone the two
+  // bars of the switcher stack instead of sitting side by side.
   const [wideLayout, setWideLayout] = useState(true);
   const count = works.length;
   const lastIndex = Math.max(count - 1, 0);
@@ -718,8 +757,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       allowNestedScroll: true,
       syncTouch: true,
     });
-    lenis.options.gestureOrientation =
-      modeRef.current === "3d-2" ? "both" : "vertical";
+    lenis.options.gestureOrientation = gestureFor(modeRef.current);
     lenisRef.current = lenis;
 
     const stopSound = primeTickSound();
@@ -836,7 +874,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const focus = focusIndex(m, count, local, viewport);
       if (lastFocus !== null && m === lastFocusMode) {
         // The 3D carousels click like a dial as each card passes the centre.
-        if (m === "3d-1" || m === "3d-2") {
+        if (familyOf(m) === "3d") {
           if (crossings(lastFocus, focus) > 0) {
             playTick();
             sounds.tick++;
@@ -879,7 +917,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       lastFrameMode = m;
 
       const targets = planes.map((_, i) => targetFor(m, i, count, local, viewport));
-      if (!viewport.wide && (m === "3d-1" || m === "3d-2")) {
+      if (!viewport.wide && familyOf(m) === "3d") {
         centreStack(targets, viewport, local);
       }
 
@@ -1025,7 +1063,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     const { top, gap } = layoutOf(vp);
     const { h } = flowCardSize(m, vp);
     const row = Math.round(Math.max(local - top + 1, 0) / (h + gap));
-    return Math.min(m === "2-col" ? row * 2 : row, lastIndex);
+    return Math.min(row * colsOf(m), lastIndex);
   };
 
   /** Section-local scroll offset that puts `anchor` in view in mode `m`. */
@@ -1038,7 +1076,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     }
     const { gap } = layoutOf(vp);
     const { h } = flowCardSize(m, vp);
-    const row = m === "2-col" ? Math.floor(anchor / 2) : anchor;
+    const row = Math.floor(anchor / colsOf(m));
     return Math.min(Math.max(row * (h + gap), 0), max);
   };
 
@@ -1062,9 +1100,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       // re-measure after the spacer changes or the jump lands short.
       lenis.resize();
       lenis.scrollTo(nextScroll, { immediate: true, force: true });
-      // 3D-2 lays the cards out sideways, so a horizontal trackpad swipe
-      // should drive it too.
-      lenis.options.gestureOrientation = next === "3d-2" ? "both" : "vertical";
+      lenis.options.gestureOrientation = gestureFor(next);
     } else {
       window.scrollTo({ top: nextScroll, behavior: "instant" });
     }
@@ -1087,13 +1123,6 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   useLayoutEffect(() => {
     lenisRef.current?.dimensions.resize();
   }, [docHeight]);
-
-  // 3D-2 doesn't exist on mobile; if the window narrows while it's active,
-  // fall back to its vertical sibling rather than leave a hidden mode on.
-  useEffect(() => {
-    if (!wideLayout && mode === "3d-2") handleModeChange("3d-1");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wideLayout, mode]);
 
   return (
     <div ref={rootRef} className="w-full flex-1">
@@ -1119,7 +1148,6 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           mode={mode}
           onChange={handleModeChange}
           visible={switcherVisible}
-          modes={wideLayout ? undefined : ["1-col", "2-col", "3d-1", "card"]}
         />
       )}
     </div>
