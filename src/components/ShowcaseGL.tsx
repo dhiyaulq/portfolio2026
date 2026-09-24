@@ -4,7 +4,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import Lenis from "lenis";
 import { urlFor } from "@/lib/sanity";
-import { playCard, playTick, primeTickSound, tickSoundState } from "@/lib/tickSound";
+import {
+  playCard,
+  playSettle,
+  playTick,
+  primeTickSound,
+  tickSoundState,
+} from "@/lib/tickSound";
 import type { MediaItem, WorkListItem } from "@/lib/queries";
 import LayoutSwitcher, {
   axisOf,
@@ -120,6 +126,19 @@ const SWITCHER_OFFSET = { wide: 40, narrow: 32 };
 const SWITCHER_H = 40;
 // Clear space between the last card and the switcher when a column ends.
 const END_CLEARANCE = 32;
+
+// Changing layout sounds like a pack of cards being squared up: every card
+// that can be seen makes one very soft sound as it reaches its new place.
+// A card counts as having moved once it's travelled this far, and as having
+// arrived once it's this close — the gap between the two is what spreads the
+// sounds out, because a card crossing the screen takes noticeably longer to
+// close its last pixels than one that only shuffled sideways.
+const MOVED_PX = 10;
+const ARRIVED_PX = 4;
+// However full the screen is, this is enough cards to read as a pack. Past
+// it the sounds stop being separable anyway, and each one is a voice the
+// browser has to mix.
+const MAX_SETTLE_SOUNDS = 14;
 
 /** Spacing for the showcase column, desktop vs mobile. */
 function layoutOf(vp: Viewport) {
@@ -632,7 +651,13 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     let renderCount = 0;
     let tickCount = 0;
     // Dev-only counters: how many times each sound has been asked for.
-    const sounds = { tick: 0, deal: 0, gather: 0 };
+    const sounds = { tick: 0, deal: 0, gather: 0, settle: 0 };
+    // How many cards have landed audibly in the transition now running.
+    let settleVoices = 0;
+    // Dev-only: when each of them landed, relative to the switch. The spread
+    // is the whole effect, so it's the thing worth being able to measure.
+    let settleAt: number[] = [];
+    let switchedAt = 0;
 
     // Uploading a texture — pushing the pixels to the GPU and building its
     // mipmaps — costs a few milliseconds of main thread each, and a layout
@@ -728,7 +753,18 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         };
       }
 
-      return { mesh, material, current: null as Target | null, src, load };
+      return {
+        mesh,
+        material,
+        current: null as Target | null,
+        src,
+        load,
+        // Arrival bookkeeping for the layout-change sound: whether this card
+        // has travelled far enough this transition to be worth a sound, and
+        // whether it has already made it.
+        moved: false,
+        settled: false,
+      };
     });
 
     // Phones resize the viewport whenever the address bar slides in or out,
@@ -936,8 +972,19 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         tickCount++;
         return;
       }
+      const switched = m !== lastFrameMode;
       lastFrameScroll = scrollY;
       lastFrameMode = m;
+      if (switched) {
+        // A new layout: every card is a candidate to be heard landing again.
+        settleVoices = 0;
+        settleAt = [];
+        switchedAt = now;
+        planes.forEach((p) => {
+          p.moved = false;
+          p.settled = false;
+        });
+      }
 
       const targets = planes.map((_, i) => targetFor(m, i, count, local, viewport));
       if (!viewport.wide && familyOf(m) === "3d") {
@@ -961,16 +1008,44 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         }
 
         const c = p.current ?? { ...t };
-        motion = Math.max(
-          motion,
+        const travel = Math.max(
           Math.abs(t.x - c.x),
           Math.abs(t.y - c.y),
-          Math.abs(t.w - c.w),
+          Math.abs(t.w - c.w)
+        );
+        motion = Math.max(
+          motion,
+          travel,
           Math.abs(t.opacity - c.opacity) * 100,
           // Radians are small numbers; a degree of turn is worth about as
           // much to the eye as a few pixels of travel.
           Math.abs(t.rot - c.rot) * 200
         );
+
+        // The sound of this card landing. Only while a layout change is
+        // running — during a scroll the cards are always in motion, and
+        // every one of them would be arriving somewhere every frame.
+        if (settlingRef.current) {
+          if (travel > MOVED_PX) {
+            p.moved = true;
+          } else if (p.moved && !p.settled && travel < ARRIVED_PX) {
+            p.settled = true;
+            // Only what can actually be seen: a card that lands off-screen,
+            // or lands invisible, didn't land as far as anyone can tell.
+            const onScreen =
+              t.opacity > 0.05 &&
+              screenTop < viewport.visH &&
+              screenTop + t.h > 0;
+            if (onScreen && settleVoices < MAX_SETTLE_SOUNDS) {
+              settleVoices++;
+              playSettle();
+              sounds.settle++;
+              if (process.env.NODE_ENV === "development") {
+                settleAt.push(Math.round(now - switchedAt));
+              }
+            }
+          }
+        }
         c.x += (t.x - c.x) * k;
         c.y += (t.y - c.y) * k;
         c.w += (t.w - c.w) * k;
@@ -1020,6 +1095,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           sound: tickSoundState(),
           pendingUploads: uploads.length,
           sounds: { ...sounds },
+          settleAt: [...settleAt],
           planes: planes.map((p) => ({ ...p.current, src: p.src })),
         };
       }

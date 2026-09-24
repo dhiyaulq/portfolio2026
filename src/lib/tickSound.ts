@@ -190,6 +190,74 @@ export function buildCardSound(
   body.stop(at + 0.05);
 }
 
+/**
+ * One card coming to rest on a pile — the sound a layout change is made of.
+ *
+ * On its own it's almost nothing: a breath of noise at a quarter of the
+ * tick's level, with a soft attack and no impact in it. It isn't meant to be
+ * heard on its own. A layout change lands a dozen of these a few tens of
+ * milliseconds apart, because each card takes a different time to reach its
+ * new slot, and a dozen soft landings at uneven intervals is what shuffling
+ * cards actually is.
+ *
+ * Every one differs slightly in pitch, length and weight; identical repeats
+ * are what made earlier attempts sound synthetic rather than physical.
+ */
+const SETTLE_VOLUME = 0.045;
+
+export function buildSettleSound(
+  context: BaseAudioContext,
+  noiseBuffer: AudioBuffer,
+  at: number,
+  destination: AudioNode,
+  volume = SETTLE_VOLUME
+) {
+  const vary = 0.85 + Math.random() * 0.3;
+  const length = (0.05 + Math.random() * 0.03) * vary;
+
+  const src = context.createBufferSource();
+  src.buffer = noiseBuffer;
+
+  const band = context.createBiquadFilter();
+  band.type = "bandpass";
+  band.Q.value = 0.7;
+  const top = 2000 * vary;
+  band.frequency.setValueAtTime(top, at);
+  band.frequency.exponentialRampToValueAtTime(top * 0.6, at + length);
+
+  // Nothing low: a card settling has no thump to it, and any low end here
+  // turns a handful of these into a rumble.
+  const high = context.createBiquadFilter();
+  high.type = "highpass";
+  high.frequency.value = 800;
+  const air = context.createBiquadFilter();
+  air.type = "lowpass";
+  air.frequency.value = 7000;
+
+  const gain = context.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  // 6ms in: soft enough to have no click, quick enough to still be an event.
+  gain.gain.exponentialRampToValueAtTime(volume * (0.7 + Math.random() * 0.5), at + 0.006);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
+
+  src.connect(band).connect(high).connect(air).connect(gain).connect(destination);
+  src.start(at, Math.random() * 0.4, length + 0.02);
+  src.stop(at + length + 0.02);
+}
+
+/**
+ * A card arriving in its new place. No rate limit: several landing together
+ * is the point, and the showcase caps how many it asks for.
+ */
+export function playSettle() {
+  if (!ctx || !noise) return;
+  if (ctx.state !== "running") {
+    if (navigator.userActivation?.hasBeenActive) void ctx.resume();
+    return;
+  }
+  buildSettleSound(ctx, noise, ctx.currentTime, ctx.destination);
+}
+
 /** Create the audio context and unlock it on the first real user gesture. */
 export function primeTickSound() {
   if (typeof window === "undefined" || ctx) return () => {};
@@ -287,10 +355,12 @@ if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
   // they actually produce — levels, spectrum, decay — without playing them.
   (window as unknown as Record<string, unknown>).__soundLab = {
     buildCardSound,
+    buildSettleSound,
     buildTick: buildBuffer,
     buildNoise,
     VOLUME,
     CARD_VOLUME,
+    SETTLE_VOLUME,
   };
 }
 
