@@ -20,7 +20,6 @@ import {
   PILL_SPRING,
   PILL_STYLE,
 } from "@/components/glassDock";
-import { playShuffle } from "@/lib/tickSound";
 
 // ---------------------------------------------------------------------------
 // The showcase has three ways of looking at the work — a column grid, a 3D
@@ -396,9 +395,10 @@ function ColumnSlider({
   const set = (next: number) => {
     const n = clampCols(next);
     if (n === cols) return;
-    // A soft shuffle of cards as the grid opens or closes up. Drag through
-    // several stops and they run into each other and keep shuffling.
-    playShuffle();
+    // Silent on purpose. Every card sound tried here — a rub, a riffle, a
+    // shuffle — read as something other than cards at this size and this
+    // repetition rate; the grid re-flowing is feedback enough until one is
+    // found that doesn't. (The last attempt is in git, at 0081baf.)
     onChange(n);
   };
 
