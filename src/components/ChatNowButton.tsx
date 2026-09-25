@@ -100,9 +100,11 @@ export default function ChatNowButton({
           active: { backgroundColor: "#f6f6f6", boxShadow: SHADOW_PRESSED },
         }}
         transition={{ duration: 0.15, ease: "easeOut" }}
-        // 8px both sides, 6 top and bottom (Figma 223:4938), which is what
-        // keeps it 34px tall next to the primary button.
-        className="relative flex items-center gap-1.5 rounded-full px-2 py-1.5"
+        // 12 left / 8 right, 6 top and bottom (Figma 223:4938). Asymmetric
+        // the opposite way round to the primary button: there the mark leads
+        // and sits tight to the edge, here the chevron trails and does. 6
+        // top and bottom is what keeps it 34px tall next to it.
+        className="relative flex items-center gap-1.5 rounded-full py-1.5 pl-3 pr-2"
       >
         <span className="text-sm font-medium leading-[22px] text-[#1e1e1e]">
           Chat Now
@@ -127,7 +129,7 @@ export default function ChatNowButton({
           />
         </motion.svg>
         {/* 1px stroke drawn inside the edge (like Figma's inside-aligned
-            stroke) so it doesn't add to the 8/6 padding — the button stays
+            stroke) so it doesn't add to the padding — the button stays
             34px tall.
 
             The design's own value for this stroke is 2% grey, which
