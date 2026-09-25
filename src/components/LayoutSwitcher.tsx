@@ -264,7 +264,7 @@ function SegmentedBar<T extends string>({
 
   return (
     <motion.div
-      className={DOCK_CLASS}
+      className={`${DOCK_CLASS} pointer-events-auto`}
       style={DOCK_MOTION_STYLE}
       initial="hidden"
       animate="shown"
@@ -446,7 +446,7 @@ function ColumnSlider({
   return (
     <motion.div
       ref={rootRef}
-      className={`${DOCK_CLASS} h-10 w-[200px] cursor-grab touch-none select-none outline-none active:cursor-grabbing`}
+      className={`${DOCK_CLASS} pointer-events-auto h-10 w-[200px] cursor-grab touch-none select-none outline-none active:cursor-grabbing`}
       style={{ ...DOCK_MOTION_STYLE, ...NO_TAP_HIGHLIGHT }}
       initial="hidden"
       animate="shown"
@@ -540,10 +540,15 @@ export default function LayoutSwitcher({
 
   return (
     // 32px from the bottom on mobile (Figma 155:510), 40px on desktop.
+    //
+    // pointer-events-none on everything except the bars themselves. This
+    // strip is fixed and spans the whole width — including the sidebar, which
+    // it sits above at z-30 — so while it was catching clicks it was also
+    // catching the ones meant for the social links in the sidebar's footer,
+    // which live at exactly this height. Nothing here is clickable but the
+    // bars, and they turn events back on for themselves.
     <div
-      className={`fixed inset-x-0 bottom-8 z-30 lg:bottom-10 lg:pl-[410px] ${
-        visible ? "" : "pointer-events-none"
-      }`}
+      className="pointer-events-none fixed inset-x-0 bottom-8 z-30 lg:bottom-10 lg:pl-[410px]"
       inert={!visible}
       aria-hidden={!visible}
     >
