@@ -590,6 +590,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   const lastIndex = Math.max(count - 1, 0);
 
   const [docHeight, setDocHeight] = useState(0);
+  // Set below, called from inside the scene: the canvas knows which card was
+  // clicked, the component knows how to change layout.
+  const zoomRef = useRef<((index: number) => void) | null>(null);
 
   // --- the scene -----------------------------------------------------------
   useEffect(() => {
@@ -795,6 +798,56 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     resize();
     window.addEventListener("resize", resizeAll);
 
+    // --- click a card to zoom it ------------------------------------------
+    // Only in a grid of more than one column: at one column the card is
+    // already as large as it gets.
+    const canZoom = (m: Mode) => familyOf(m) === "column" && colsOf(m) > 1;
+
+    /** Which card is under the pointer, or -1. */
+    const cardAt = (clientX: number, clientY: number) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      // Canvas pixels to world: the origin is the middle and +y is up.
+      const wx = clientX - rect.left - viewport.colW / 2;
+      const wy = viewport.colH / 2 - (clientY - rect.top);
+      for (let i = 0; i < planes.length; i++) {
+        const c = planes[i].current;
+        if (!c || c.opacity < 0.5) continue;
+        if (Math.abs(wx - c.x) <= c.w / 2 && Math.abs(wy - c.y) <= c.h / 2) {
+          return i;
+        }
+      }
+      return -1;
+    };
+
+    // Where the press started, so a scroll that happens to end over a card
+    // isn't mistaken for a click on it.
+    let pressed: { x: number; y: number; at: number } | null = null;
+    const onPointerDown = (e: PointerEvent) => {
+      pressed = { x: e.clientX, y: e.clientY, at: performance.now() };
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      const start = pressed;
+      pressed = null;
+      if (!start || !canZoom(modeRef.current)) return;
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) return;
+      if (performance.now() - start.at > 500) return;
+      const index = cardAt(e.clientX, e.clientY);
+      if (index >= 0) zoomRef.current?.(index);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!canZoom(modeRef.current)) return;
+      // Only over a card, so the cursor says what a click will do.
+      renderer.domElement.style.cursor =
+        cardAt(e.clientX, e.clientY) >= 0 ? "zoom-in" : "";
+    };
+    const canvas = renderer.domElement;
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointermove", onPointerMove);
+    // The canvas is inert until there is something to click: its wrapper is
+    // pointer-events-none and this turns it back on for the canvas alone.
+    let pointerOn: boolean | null = null;
+
     let raf = 0;
     let first = true;
     let lastFrameScroll = -1;
@@ -916,6 +969,13 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       }
       lastFocus = focus;
       lastFocusMode = m;
+
+      const zoomable = canZoom(m);
+      if (zoomable !== pointerOn) {
+        pointerOn = zoomable;
+        canvas.style.pointerEvents = zoomable ? "auto" : "none";
+        if (!zoomable) canvas.style.cursor = "";
+      }
 
       // Snap on the first frame. During a mode switch, ease so each card
       // glides to its new slot; otherwise follow Lenis's already-smoothed
@@ -1057,6 +1117,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       window.removeEventListener("touchstart", onTouchStart);
       window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("touchcancel", onTouchEnd);
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointermove", onPointerMove);
       lenis.destroy();
       lenisRef.current = null;
       stopSound();
@@ -1110,8 +1173,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     return Math.min(Math.max(row * (h + gap), 0), max);
   };
 
-  const handleModeChange = (next: Mode) => {
-    const anchor = readAnchor(modeRef.current);
+  /** Change layout, keeping `anchor` — an index into the work — in view. */
+  const applyMode = (next: Mode, anchor: number) => {
     const nextHeight = contentHeight(next, count, currentViewport());
     const nextScroll = sectionTop() + scrollForAnchor(next, anchor);
 
@@ -1139,6 +1202,14 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     setMode(next);
     setDocHeight(nextHeight);
   };
+
+  const handleModeChange = (next: Mode) =>
+    applyMode(next, readAnchor(modeRef.current));
+
+  // Clicking a card in a grid opens it on its own: the same layout change the
+  // slider makes, but anchored to the card that was clicked rather than to
+  // whatever happened to be in the middle of the screen.
+  zoomRef.current = (index: number) => applyMode("col-1", index);
 
   useEffect(() => {
     setDocHeight(contentHeight(mode, count, currentViewport()));
