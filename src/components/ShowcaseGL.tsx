@@ -593,6 +593,11 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
   // Set below, called from inside the scene: the canvas knows which card was
   // clicked, the component knows how to change layout.
   const zoomRef = useRef<((index: number) => void) | null>(null);
+  // The little "Zoom" pill that stands in for the cursor over a card. Moved
+  // imperatively from the pointer handler rather than through state: it
+  // follows every pointermove, and a React render per move would re-render
+  // the switcher sixty times a second for a transform.
+  const hintRef = useRef<HTMLDivElement>(null);
 
   // --- the scene -----------------------------------------------------------
   useEffect(() => {
@@ -834,16 +839,39 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       const index = cardAt(e.clientX, e.clientY);
       if (index >= 0) zoomRef.current?.(index);
     };
+    // The pill takes the cursor's place over a card, so it sits just off the
+    // point itself the way a cursor's own badge would.
+    const HINT_OFFSET = 12;
+    const showHint = (x: number, y: number) => {
+      const hint = hintRef.current;
+      if (!hint) return;
+      hint.style.transform = `translate3d(${x + HINT_OFFSET}px, ${y + HINT_OFFSET}px, 0)`;
+      hint.style.opacity = "1";
+    };
+    const hideHint = () => {
+      const hint = hintRef.current;
+      if (hint) hint.style.opacity = "0";
+    };
+
     const onPointerMove = (e: PointerEvent) => {
       if (!canZoom(modeRef.current)) return;
-      // Only over a card, so the cursor says what a click will do.
-      renderer.domElement.style.cursor =
-        cardAt(e.clientX, e.clientY) >= 0 ? "zoom-in" : "";
+      // Only over a card: in the gutters between them there is nothing to
+      // zoom, so the ordinary cursor comes back.
+      const over = cardAt(e.clientX, e.clientY) >= 0;
+      renderer.domElement.style.cursor = over ? "none" : "";
+      if (over) showHint(e.clientX, e.clientY);
+      else hideHint();
+    };
+    const onPointerOut = () => {
+      renderer.domElement.style.cursor = "";
+      hideHint();
     };
     const canvas = renderer.domElement;
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerout", onPointerOut);
+    canvas.addEventListener("pointercancel", onPointerOut);
     // The canvas is inert until there is something to click: its wrapper is
     // pointer-events-none and this turns it back on for the canvas alone.
     let pointerOn: boolean | null = null;
@@ -974,7 +1002,10 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       if (zoomable !== pointerOn) {
         pointerOn = zoomable;
         canvas.style.pointerEvents = zoomable ? "auto" : "none";
-        if (!zoomable) canvas.style.cursor = "";
+        if (!zoomable) {
+          canvas.style.cursor = "";
+          hideHint();
+        }
       }
 
       // Snap on the first frame. During a mode switch, ease so each card
@@ -1120,6 +1151,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerout", onPointerOut);
+      canvas.removeEventListener("pointercancel", onPointerOut);
       lenis.destroy();
       lenisRef.current = null;
       stopSound();
@@ -1247,6 +1280,35 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         className="pointer-events-none fixed inset-y-0 right-0 left-0 z-0 lg:left-[410px]"
       />
       <div ref={spacerRef} style={{ height: docHeight }} aria-hidden />
+
+      {/* What a click on a card will do (Figma 240:5495). It replaces the
+          cursor rather than sitting beside it, so it's placed from the top
+          left corner and follows the pointer exactly — no transition on the
+          transform, or it would lag behind the hand. */}
+      <div
+        ref={hintRef}
+        aria-hidden
+        className="pointer-events-none fixed left-0 top-0 z-50 flex items-center gap-1 rounded-full py-0.5 pl-1 pr-1.5 opacity-0 backdrop-blur-[3px] transition-opacity duration-100 will-change-transform"
+        style={{
+          backgroundColor: "rgba(255,255,255,0.8)",
+          boxShadow:
+            "0px 2px 0.5px rgba(0,0,0,0), 0px 1px 0.5px rgba(0,0,0,0.01), 0px 1px 0.5px rgba(0,0,0,0.02), 0px 0px 0.5px rgba(0,0,0,0.03), inset 0 0 0 1px rgba(0,0,0,0.06)",
+        }}
+      >
+        {/* solar:magnifier-zoom-in-bold (240:5564), inline so the pill has
+            nothing to fetch on the frame it first appears. */}
+        <svg viewBox="0 0 10 10" fill="none" className="h-2.5 w-2.5 shrink-0">
+          <path
+            fillRule="evenodd"
+            clipRule="evenodd"
+            fill="#A7A5A5"
+            d="M9.07846 9.07846C9.19608 8.96083 9.19608 8.77012 9.07846 8.65246L7.551 7.12504C8.12021 6.45858 8.46387 5.59371 8.46387 4.64858C8.46387 2.54148 6.75571 0.833333 4.64858 0.833333C2.54148 0.833333 0.833333 2.54148 0.833333 4.64858C0.833333 6.75571 2.54148 8.46387 4.64858 8.46387C5.59371 8.46387 6.45858 8.12021 7.12504 7.551L8.65246 9.07846C8.77012 9.19608 8.96083 9.19608 9.07846 9.07846ZM4.64858 3.34338C4.81496 3.34338 4.94979 3.47823 4.94979 3.64458V4.34737H5.65263C5.81896 4.34737 5.95383 4.48225 5.95383 4.64858C5.95383 4.81496 5.81896 4.94979 5.65263 4.94979H4.94979V5.65263C4.94979 5.81896 4.81496 5.95383 4.64858 5.95383C4.48225 5.95383 4.34737 5.81896 4.34737 5.65263V4.94979H3.64458C3.47823 4.94979 3.34338 4.81496 3.34338 4.64858C3.34338 4.48225 3.47823 4.34737 3.64458 4.34737H4.34737V3.64458C4.34737 3.47823 4.48225 3.34338 4.64858 3.34338Z"
+          />
+        </svg>
+        <span className="text-[10px] font-medium leading-[14px] tracking-[0.15px] text-[#4c4b4b]">
+          Zoom
+        </span>
+      </div>
 
       {count === 0 ? (
         <p className="p-10 text-sm text-muted">
