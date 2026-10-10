@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { TelegramIcon, WhatsappIcon } from "@/components/ChatIcons";
 
 const SHADOW_IDLE =
   "0px 7px 1px rgba(0,0,0,0), 0px 5px 1px rgba(0,0,0,0.01), 0px 3px 1px rgba(0,0,0,0.03), 0px 1px 0.5px rgba(0,0,0,0.04), 0px 0px 0.5px rgba(0,0,0,0.05)";
@@ -199,16 +200,11 @@ export default function ChatNowButton({
                   }}
                   className="flex items-center gap-1 rounded-full py-1.5 pl-2 pr-3 outline-none transition-colors hover:bg-[#f6f6f6] focus-visible:bg-[#f6f6f6]"
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={
-                      id === "whatsapp"
-                        ? "/icons/whatsapp.svg"
-                        : "/icons/telegram-mark.svg"
-                    }
-                    alt=""
-                    className="h-5 w-5 shrink-0"
-                  />
+                  {id === "whatsapp" ? (
+                    <WhatsappIcon className="h-5 w-5 shrink-0" />
+                  ) : (
+                    <TelegramIcon className="h-5 w-5 shrink-0" />
+                  )}
                   <span className="whitespace-nowrap text-sm font-medium leading-[22px] text-[#1e1e1e]">
                     {label}
                   </span>
