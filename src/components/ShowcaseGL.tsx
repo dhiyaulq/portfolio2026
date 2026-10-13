@@ -608,7 +608,23 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     // shader's rounded-rect mask, which anti-aliases itself. MSAA would cost
     // 4x the framebuffer bandwidth to smooth edges that no longer exist.
     const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
-    const dpr = Math.min(window.devicePixelRatio, 2);
+    // Draw at the screen's own density, up to 3.
+    //
+    // This used to stop at 2, which is why a phone looked soft: an iPhone is
+    // a 3x screen, so a 2x canvas was being stretched 1.5x by the browser
+    // before it ever reached the glass — every card blurred by a resample
+    // that had nothing to do with the image itself. Nothing above 3 is worth
+    // paying for; the cost is the square of this number.
+    //
+    // It comes back down on its own if the device can't hold a frame rate
+    // there, which is what `sampleCost` below does.
+    const DPR_STEPS = [3, 2.5, 2, 1.5];
+    const screenDpr = Math.min(window.devicePixelRatio || 1, 3);
+    let dprStep = Math.max(
+      0,
+      DPR_STEPS.findIndex((v) => v <= screenDpr + 0.001)
+    );
+    let dpr = Math.min(DPR_STEPS[dprStep], screenDpr);
     renderer.setPixelRatio(dpr);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     mount.appendChild(renderer.domElement);
@@ -636,8 +652,24 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     // Fixed for the life of the scene: swapping texture sizes mid-session
     // would refetch every image and flash.
     const tex = textureSizeFor(viewport, dpr);
+    // On a 3x screen the same card carries 2.25x the texels, and at q95 that
+    // is 71% more to download (measured: 79KB -> 135KB for one card). At that
+    // density the difference between 95 and 90 is below what the eye can
+    // resolve — three device pixels per CSS pixel — while 90 brings the cost
+    // back to +25%. Anything 2x or under keeps 95, where the texels are
+    // scarce enough for compression to show.
+    const quality = dpr >= 2.5 ? 90 : 95;
     let needsRender = true;
     let renderCount = 0;
+    // Rolling cost of a drawn frame, and how many we've judged it on. Only
+    // frames drawn back to back count: the scene stops rendering when nothing
+    // moves, and the gap across a pause says nothing about how fast it is.
+    let frameCost = 1000 / 60;
+    let costFrames = 0;
+    let lastDrawn = 0;
+    // ~45fps. Below this the scrolling is visibly costing something, and a
+    // sharper picture isn't worth it.
+    const SLOW_FRAME_MS = 22;
     let tickCount = 0;
     // Dev-only counters: how many times each sound has been asked for.
     const sounds = { tick: 0, deal: 0, gather: 0 };
@@ -686,7 +718,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
           .width(tex.w)
           .height(tex.h)
           .fit("crop")
-          .quality(95)
+          .quality(quality)
           .auto("format")
           .url();
         src = url;
@@ -794,6 +826,37 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     const stopSound = primeTickSound();
     let lastFocus: number | null = null;
     let lastFocusMode = modeRef.current;
+
+    /**
+     * Come down a step if the frames are consistently slow. One way only —
+     * stepping back up on a quiet moment would oscillate, and a resolution
+     * that changes while you watch is worse than one that is merely lower.
+     */
+    const sampleCost = (now: number) => {
+      const gap = now - lastDrawn;
+      lastDrawn = now;
+      // A gap this long means the scene had stopped drawing, not that the
+      // frame was slow.
+      if (gap > 100) {
+        costFrames = 0;
+        return;
+      }
+      frameCost += (gap - frameCost) * 0.08;
+      costFrames++;
+      if (
+        costFrames > 45 &&
+        frameCost > SLOW_FRAME_MS &&
+        dprStep < DPR_STEPS.length - 1
+      ) {
+        dprStep++;
+        dpr = Math.min(DPR_STEPS[dprStep], screenDpr);
+        renderer.setPixelRatio(dpr);
+        renderer.setSize(viewport.colW, viewport.colH);
+        costFrames = 0;
+        frameCost = 1000 / 60;
+        needsRender = true;
+      }
+    };
 
     const resizeAll = () => {
       resize();
@@ -1106,6 +1169,8 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
       if (process.env.NODE_ENV === "development") {
         (window as unknown as Record<string, unknown>).__gl = {
           mode: m,
+          dpr,
+          frameCost: Math.round(frameCost * 10) / 10,
           scrollY,
           viewport: { ...viewport },
           renderCount,
@@ -1126,6 +1191,7 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         renderer.render(scene, camera);
         needsRender = false;
         renderCount++;
+        sampleCost(now);
       }
       tickCount++;
     };
@@ -1329,3 +1395,4 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     </div>
   );
 }
+
