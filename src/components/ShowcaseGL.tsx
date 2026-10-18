@@ -618,7 +618,10 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     //
     // It comes back down on its own if the device can't hold a frame rate
     // there, which is what `sampleCost` below does.
-    const DPR_STEPS = [3, 2.5, 2, 1.5];
+    // The floor is 2, which is what the scene always drew at. Dropping
+    // below it would make the page worse than it was before any of this,
+    // which is not a trade worth making for frame rate.
+    const DPR_STEPS = [3, 2.5, 2];
     const screenDpr = Math.min(window.devicePixelRatio || 1, 3);
     let dprStep = Math.max(
       0,
@@ -652,13 +655,12 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     // Fixed for the life of the scene: swapping texture sizes mid-session
     // would refetch every image and flash.
     const tex = textureSizeFor(viewport, dpr);
-    // On a 3x screen the same card carries 2.25x the texels, and at q95 that
-    // is 71% more to download (measured: 79KB -> 135KB for one card). At that
-    // density the difference between 95 and 90 is below what the eye can
-    // resolve — three device pixels per CSS pixel — while 90 brings the cost
-    // back to +25%. Anything 2x or under keeps 95, where the texels are
-    // scarce enough for compression to show.
-    const quality = dpr >= 2.5 ? 90 : 95;
+    // 95 everywhere. A 3x screen pulls 2.25x the texels and so costs more to
+    // download — measured, 79KB to 135KB for one card — and dropping to 90
+    // claws most of that back at a density where the difference is below
+    // what the eye resolves. But the ask here was quality, and bytes were
+    // not the complaint, so the compression stays where it was.
+    const quality = 95;
     let needsRender = true;
     let renderCount = 0;
     // Rolling cost of a drawn frame, and how many we've judged it on. Only
@@ -667,9 +669,15 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     let frameCost = 1000 / 60;
     let costFrames = 0;
     let lastDrawn = 0;
-    // ~45fps. Below this the scrolling is visibly costing something, and a
-    // sharper picture isn't worth it.
-    const SLOW_FRAME_MS = 22;
+    // The two ends of the decision, far enough apart that it can't sit on
+    // the boundary and flip back and forth: step down under ~42fps, step
+    // back up only when the frames are comfortably inside 60.
+    const SLOW_FRAME_MS = 24;
+    const FAST_FRAME_MS = 13;
+    // How long each decision has to hold. Coming back up is deliberately
+    // slower to ask for than going down.
+    const SLOW_FRAMES = 90;
+    const FAST_FRAMES = 240;
     let tickCount = 0;
     // Dev-only counters: how many times each sound has been asked for.
     const sounds = { tick: 0, deal: 0, gather: 0 };
@@ -827,34 +835,57 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     let lastFocus: number | null = null;
     let lastFocusMode = modeRef.current;
 
+    const setDprStep = (step: number) => {
+      dprStep = step;
+      dpr = Math.min(DPR_STEPS[dprStep], screenDpr);
+      renderer.setPixelRatio(dpr);
+      renderer.setSize(viewport.colW, viewport.colH);
+      costFrames = 0;
+      frameCost = 1000 / 60;
+      needsRender = true;
+    };
+
     /**
-     * Come down a step if the frames are consistently slow. One way only —
-     * stepping back up on a quiet moment would oscillate, and a resolution
-     * that changes while you watch is worse than one that is merely lower.
+     * Follow how long a drawn frame is taking and trade resolution for it.
+     *
+     * The thing this has to get right is WHICH frames it judges. All it can
+     * see is the gap between two draws, and plenty of that gap has nothing
+     * to do with how many pixels the GPU is filling: pushing a texture to
+     * the card costs several milliseconds on a phone, a layout change moves
+     * every card at once, and the main thread has the page's own work to do
+     * besides. Lowering the resolution makes none of those faster, so
+     * counting them would drop the picture for no gain — which is exactly
+     * what the first version of this did on a phone, where the uploads land
+     * in the first seconds of scrolling and it would never come back up.
+     *
+     * So: only frames with nothing queued and nothing in transition, and
+     * only after enough of them in a row to be sure.
      */
-    const sampleCost = (now: number) => {
+    const sampleCost = (now: number, busy: boolean) => {
       const gap = now - lastDrawn;
       lastDrawn = now;
-      // A gap this long means the scene had stopped drawing, not that the
-      // frame was slow.
-      if (gap > 100) {
+      // Either the scene had stopped drawing, or the frame was doing
+      // something other than drawing. Neither says anything about fill rate.
+      if (gap > 100 || busy) {
         costFrames = 0;
         return;
       }
       frameCost += (gap - frameCost) * 0.08;
       costFrames++;
       if (
-        costFrames > 45 &&
+        costFrames > SLOW_FRAMES &&
         frameCost > SLOW_FRAME_MS &&
         dprStep < DPR_STEPS.length - 1
       ) {
-        dprStep++;
-        dpr = Math.min(DPR_STEPS[dprStep], screenDpr);
-        renderer.setPixelRatio(dpr);
-        renderer.setSize(viewport.colW, viewport.colH);
-        costFrames = 0;
-        frameCost = 1000 / 60;
-        needsRender = true;
+        setDprStep(dprStep + 1);
+      } else if (
+        costFrames > FAST_FRAMES &&
+        frameCost < FAST_FRAME_MS &&
+        dprStep > 0
+      ) {
+        // It got through a rough patch — a burst of uploads, a slow moment
+        // elsewhere on the page — and the picture should come back.
+        setDprStep(dprStep - 1);
       }
     };
 
@@ -1191,7 +1222,9 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
         renderer.render(scene, camera);
         needsRender = false;
         renderCount++;
-        sampleCost(now);
+        // A frame that also uploaded a texture, or one in the middle of a
+        // layout change, is busy for reasons resolution can't fix.
+        sampleCost(now, uploads.length > 0 || settlingRef.current);
       }
       tickCount++;
     };
@@ -1395,4 +1428,3 @@ export default function ShowcaseGL({ works }: { works: WorkListItem[] }) {
     </div>
   );
 }
-
